@@ -28,9 +28,9 @@ const DEFAULT_PORT: u16 = 6379;
 pub struct Server {
   listener: TcpListener,
 
-  notify_shutdown: broadcast::Sender<()>,
+  config: Config,
 
-  shutdown_complete_tx: mpsc::Sender<()>,
+  notify_shutdown: broadcast::Sender<()>,
 
   pub running_tx: watch::Sender<()>,
   pub running_rx: watch::Receiver<()>,
@@ -48,11 +48,7 @@ impl Server {
       let (socket, client_addr) = self.listener.accept().await?;
       info!("accept connection from {:?}", client_addr);
 
-      let mut connection = Connection::new(
-        socket,
-        Shutdown::new(self.notify_shutdown.subscribe()),
-        self.shutdown_complete_tx.clone(),
-      );
+      let mut connection = Connection::new(socket, Shutdown::new(self.notify_shutdown.subscribe()));
 
       tokio::spawn(async move {
         if let Err(err) = connection.run().await {
@@ -62,61 +58,82 @@ impl Server {
     }
     Ok(())
   }
-}
 
-async fn start_raft_service(server: Arc<Server>, config: &Config) -> Result<()> {
-  let host = &config.raft_host;
-  let port = &config.raft_port;
-  info!("Start raft service listening on: {}:{}", host, port);
+  async fn start_raft_service(&self) -> Result<()> {
+    let config = &self.config;
 
-  let raft_service_impl = RaftServiceImpl::new(server.raft.clone());
-  let raft_server = RaftServiceServer::new(raft_service_impl)
-    .max_decoding_message_size(GrpcConfig::MAX_DECODING_SIZE)
-    .max_encoding_message_size(GrpcConfig::MAX_ENCODING_SIZE);
+    let host = &config.raft_host;
+    let port = &config.raft_port;
+    info!("Start raft service listening on: {}:{}", host, port);
 
-  let ipv4_addr = host.parse::<Ipv4Addr>();
-  let ip_port = match ipv4_addr {
-    Ok(addr) => format!("{}:{}", addr, port),
-    Err(_) => {
-      let resolver = DNSResolver::instance()
-        .map_err(|e| Error::Network(format!("get dns resolver instance error: {}", e)))?;
-      let ip_addrs = resolver
-        .resolve(host.clone())
+    let raft_service_impl = RaftServiceImpl::new(self.raft.clone());
+    let raft_server = RaftServiceServer::new(raft_service_impl)
+      .max_decoding_message_size(GrpcConfig::MAX_DECODING_SIZE)
+      .max_encoding_message_size(GrpcConfig::MAX_ENCODING_SIZE);
+
+    let ipv4_addr = host.parse::<Ipv4Addr>();
+    let ip_port = match ipv4_addr {
+      Ok(addr) => format!("{}:{}", addr, port),
+      Err(_) => {
+        let resolver = DNSResolver::instance()
+          .map_err(|e| Error::Network(format!("get dns resolver instance error: {}", e)))?;
+        let ip_addrs = resolver
+          .resolve(host.clone())
+          .await
+          .map_err(|e| Error::Network(format!("resolve addr {} error: {}", host, e)))?;
+        format!("{}:{}", ip_addrs[0], port)
+      }
+    };
+
+    info!("about to start raft grpc on: {}", ip_port);
+
+    let socket_addr = ip_port
+      .parse::<std::net::SocketAddr>()
+      .map_err(|e| Error::Network(format!("Parse addr {} error: {}", ip_port, e)))?;
+    let node_id = config.node_id;
+
+    let srv = tonic::transport::Server::builder().add_service(raft_server);
+    let mut running_rx = self.running_rx.clone();
+
+    let h = tokio::spawn(async move {
+      srv
+        .serve_with_shutdown(socket_addr, async move {
+          let _ = running_rx.changed().await;
+          info!(
+            "running_rx for Raft server received, shutting down: id={} {} ",
+            node_id, ip_port
+          );
+        })
         .await
-        .map_err(|e| Error::Network(format!("resolve addr {} error: {}", host, e)))?;
-      format!("{}:{}", ip_addrs[0], port)
+        .map_err(|e| AnyError::new(&e).add_context(|| "when serving meta-service raft service"))?;
+
+      Ok::<(), AnyError>(())
+    });
+
+    let mut jh = self.join_handles.lock().await;
+    jh.push(h);
+
+    Ok(())
+  }
+
+  pub async fn shutdown(&self) {
+    drop(self.notify_shutdown.clone());
+
+    self.running_tx.send(()).unwrap();
+
+    for j in self.join_handles.lock().await.iter_mut() {
+      let res = j.await;
+      info!("task quit res: {:?}", res);
+
+      // The returned error does not mean this function call failed.
+      // Do not need to return this error. Keep shutting down other tasks.
+      if let Err(ref e) = res {
+        error!("task quit with error: {:?}", e);
+      }
     }
-  };
 
-  info!("about to start raft grpc on: {}", ip_port);
-
-  let socket_addr = ip_port
-    .parse::<std::net::SocketAddr>()
-    .map_err(|e| Error::Network(format!("Parse addr {} error: {}", ip_port, e)))?;
-  let node_id = config.node_id;
-
-  let srv = tonic::transport::Server::builder().add_service(raft_server);
-  let mut running_rx = server.running_rx.clone();
-
-  let h = tokio::spawn(async move {
-    srv
-      .serve_with_shutdown(socket_addr, async move {
-        let _ = running_rx.changed().await;
-        info!(
-          "running_rx for Raft server received, shutting down: id={} {} ",
-          node_id, ip_port
-        );
-      })
-      .await
-      .map_err(|e| AnyError::new(&e).add_context(|| "when serving meta-service raft service"))?;
-
-    Ok::<(), AnyError>(())
-  });
-
-  let mut jh = server.join_handles.lock().await;
-  jh.push(h);
-
-  Ok(())
+    info!("shutdown: id={}", self.config.node_id);
+  }
 }
 
 pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
@@ -124,7 +141,6 @@ pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
   let listener = TcpListener::bind(&format!("127.0.0.1:{}", DEFAULT_PORT)).await?;
 
   let (notify_shutdown, _) = broadcast::channel(1);
-  let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
 
   let raft = new_raft(&config).await?;
 
@@ -132,13 +148,15 @@ pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
 
   let mut server = Server {
     listener,
+    config,
     notify_shutdown,
-    shutdown_complete_tx,
     running_tx: tx,
     running_rx: rx,
     join_handles: Mutex::new(Vec::new()),
     raft: Arc::new(raft),
   };
+
+  server.start_raft_service().await?;
 
   tokio::select! {
       res = server.run() => {
@@ -152,18 +170,7 @@ pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
       }
   }
 
-  let Server {
-    shutdown_complete_tx,
-    notify_shutdown,
-    running_tx,
-    ..
-  } = server;
-
-  drop(notify_shutdown);
-  drop(shutdown_complete_tx);
-
-  let _ = shutdown_complete_rx.recv().await;
-  running_tx.send(()).unwrap();
+  server.shutdown().await;
 
   Ok(())
 }

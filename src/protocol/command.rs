@@ -3,8 +3,8 @@ use super::Parser;
 use super::cmd::Set;
 use super::cmd::Unknown;
 use crate::server::Connection;
+use crate::server::KVApi;
 use crate::server::Shutdown;
-use crate::storage::Db;
 
 #[derive(Debug)]
 pub enum Command {
@@ -37,14 +37,14 @@ impl Command {
 
   pub(crate) async fn apply(
     self,
-    db: &Db,
+    kv_api: impl KVApi,
     dst: &mut Connection,
     _shutdown: &mut Shutdown,
   ) -> crate::errors::Result<()> {
     use Command::*;
 
     match self {
-      Set(cmd) => cmd.apply(db, dst).await,
+      Set(cmd) => cmd.apply(kv_api, dst).await,
       Unknown(cmd) => cmd.apply(dst).await,
     }
   }

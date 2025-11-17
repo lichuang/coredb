@@ -26,20 +26,13 @@ pub struct Connection {
   stream: RedisStream,
 
   shutdown: Shutdown,
-
-  _shutdown_complete: mpsc::Sender<()>,
 }
 
 impl Connection {
-  pub fn new(
-    socket: TcpStream,
-    shutdown: Shutdown,
-    shutdown_complete: mpsc::Sender<()>,
-  ) -> Connection {
+  pub fn new(socket: TcpStream, shutdown: Shutdown) -> Connection {
     Connection {
       stream: RedisStream::new(socket),
       shutdown,
-      _shutdown_complete: shutdown_complete,
     }
   }
 

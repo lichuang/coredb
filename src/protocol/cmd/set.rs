@@ -9,7 +9,7 @@ use crate::protocol::Frame;
 use crate::protocol::ParseError::EndOfStream;
 use crate::protocol::Parser;
 use crate::server::Connection;
-use crate::storage::Db;
+use crate::server::KVApi;
 
 #[derive(Debug)]
 pub struct Set {
@@ -69,8 +69,7 @@ impl Set {
     Ok(Set { key, value, expire })
   }
 
-  #[instrument(skip(self, db, dst))]
-  pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> Result<()> {
+  pub(crate) async fn apply(self, kv_api: impl KVApi, dst: &mut Connection) -> Result<()> {
     // Set the value in the shared database state.
     // db.set(self.key, self.value, self.expire);
 

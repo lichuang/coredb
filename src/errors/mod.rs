@@ -22,6 +22,12 @@ pub enum Error {
 
   #[error("Parse client request error: {0}")]
   ParseRequest(#[from] ParseError),
+
+  #[error("Dns Parse error: {0}")]
+  DnsParse(String),
+
+  #[error("Network error: {0}")]
+  Network(String),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

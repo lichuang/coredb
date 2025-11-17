@@ -1,4 +1,5 @@
 mod connection;
+mod endpoint;
 mod server;
 mod shutdown;
 

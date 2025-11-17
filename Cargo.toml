@@ -13,6 +13,7 @@ byteorder = "1.4.3"
 clap = { version = "4.5", features = ["derive"] }
 configparser = "3.1.0"
 hex = "0.4"
+hickory-resolver = "0.25"
 futures = "0.3.31"
 openraft = { git="https://github.com/databendlabs/openraft.git", rev = "675fda0", features = ["type-alias"] }
 prost = "0.13"

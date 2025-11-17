@@ -14,7 +14,6 @@ mod errors;
 mod util;
 
 use config::Config;
-use errors::Result;
 use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -26,7 +25,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> errors::Result<()> {
   let args = Args::parse();
   // println!("args: {:?}", args);
 

@@ -1,12 +1,10 @@
-use crate::{
-  server::{Connection, Shutdown},
-  storage::Db,
-};
-
-use super::{
-  Frame, Parser,
-  cmd::{Set, Unknown},
-};
+use super::Frame;
+use super::Parser;
+use super::cmd::Set;
+use super::cmd::Unknown;
+use crate::server::Connection;
+use crate::server::Shutdown;
+use crate::storage::Db;
 
 #[derive(Debug)]
 pub enum Command {
@@ -16,7 +14,7 @@ pub enum Command {
 }
 
 impl Command {
-  pub fn from_frame(frame: Frame) -> crate::Result<Command> {
+  pub fn from_frame(frame: Frame) -> crate::errors::Result<Command> {
     let mut parser = Parser::new(frame)?;
 
     let command_name = parser.next_string()?.to_lowercase();
@@ -42,7 +40,7 @@ impl Command {
     db: &Db,
     dst: &mut Connection,
     _shutdown: &mut Shutdown,
-  ) -> crate::Result<()> {
+  ) -> crate::errors::Result<()> {
     use Command::*;
 
     match self {

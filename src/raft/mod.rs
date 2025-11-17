@@ -3,9 +3,6 @@ mod network;
 mod store;
 pub mod types;
 // mod raft_client;
-// mod raft_types;
-// mod state_machine;
-// mod storage;
 
 #[allow(clippy::all)]
 pub mod protobuf {
@@ -15,23 +12,24 @@ pub mod protobuf {
 use std::sync::Arc;
 
 use network::NetworkFactory;
+pub use network::RaftServiceImpl;
 pub use types::raft_types::*;
 
+use crate::config::Config;
 use crate::errors::Result;
 pub(crate) use crate::raft::store::new_storage;
 // pub use storage::new_raft_storage;
 
-pub async fn new_raft<P: AsRef<std::path::Path>>(
-  node_id: NodeId,
-  dir: P,
-  addr: String,
-) -> Result<Raft> {
-  let config = Arc::new(openraft::Config::default());
+pub async fn new_raft(config: &Config) -> Result<Raft> {
+  let raft_config = Arc::new(openraft::Config::default());
   let network = NetworkFactory::new();
+
+  let node_id = config.node_id;
+  let dir = &config.data_dir;
 
   let (log_store, state_machine) = new_storage(dir).await?;
 
-  let ret = Raft::new(1, config, network, log_store, state_machine).await;
+  let ret = Raft::new(node_id, raft_config, network, log_store, state_machine).await;
   match ret {
     Ok(raft) => Ok(raft),
     Err(e) => {

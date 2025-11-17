@@ -11,7 +11,7 @@ use tracing::debug;
 use tracing::info;
 
 use super::shutdown::Shutdown;
-use crate::Result;
+use crate::errors::Result;
 use crate::protocol::Command;
 use crate::protocol::Frame;
 use crate::protocol::ParseError;

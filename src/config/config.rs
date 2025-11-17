@@ -4,7 +4,8 @@ use configparser::ini::Ini;
 use configparser::ini::IniDefault;
 use tracing::Level;
 
-use crate::Result;
+use crate::errors::Result;
+use crate::raft::NodeId;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ConfigError {
@@ -23,6 +24,11 @@ pub struct Config {
   pub server_host: String,
   pub server_port: u32,
 
+  pub raft_host: String,
+  pub raft_port: u32,
+
+  pub node_id: NodeId,
+
   pub log_level: Level,
 
   pub data_dir: String,
@@ -33,6 +39,11 @@ impl Default for Config {
     Self {
       server_host: "127.0.0.1".to_string(),
       server_port: 6622,
+
+      raft_host: "127.0.0.1".to_string(),
+      raft_port: 22866,
+
+      node_id: 1,
       log_level: Level::INFO,
       data_dir: "./.coredb_data/".to_string(),
     }

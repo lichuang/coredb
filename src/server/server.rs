@@ -5,7 +5,6 @@ use anyerror::AnyError;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::error;
@@ -18,30 +17,27 @@ use crate::errors::Error;
 use crate::errors::Result;
 use crate::raft::Raft;
 use crate::raft::RaftServiceImpl;
-use crate::raft::new_raft;
 use crate::raft::protobuf::raft_service_server::RaftServiceServer;
 use crate::server::connection::Connection;
 use crate::util::DNSResolver;
 
-const DEFAULT_PORT: u16 = 6379;
-
 pub struct Server {
-  listener: TcpListener,
+  pub listener: TcpListener,
 
-  config: Config,
+  pub config: Config,
 
-  notify_shutdown: broadcast::Sender<()>,
+  pub notify_shutdown: broadcast::Sender<()>,
 
   pub running_tx: watch::Sender<()>,
   pub running_rx: watch::Receiver<()>,
 
   pub join_handles: Mutex<Vec<JoinHandle<Result<(), AnyError>>>>,
 
-  raft: Arc<Raft>,
+  pub raft: Arc<Raft>,
 }
 
 impl Server {
-  async fn run(&mut self) -> Result<()> {
+  pub(crate) async fn run(&mut self) -> Result<()> {
     info!("accepting connections");
 
     loop {
@@ -57,6 +53,10 @@ impl Server {
       });
     }
     Ok(())
+  }
+
+  pub(crate) async fn start(&self) -> Result<()> {
+    self.start_raft_service().await
   }
 
   async fn start_raft_service(&self) -> Result<()> {
@@ -134,43 +134,4 @@ impl Server {
 
     info!("shutdown: id={}", self.config.node_id);
   }
-}
-
-pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
-  println!("listen: {}", DEFAULT_PORT);
-  let listener = TcpListener::bind(&format!("127.0.0.1:{}", DEFAULT_PORT)).await?;
-
-  let (notify_shutdown, _) = broadcast::channel(1);
-
-  let raft = new_raft(&config).await?;
-
-  let (tx, rx) = watch::channel::<()>(());
-
-  let mut server = Server {
-    listener,
-    config,
-    notify_shutdown,
-    running_tx: tx,
-    running_rx: rx,
-    join_handles: Mutex::new(Vec::new()),
-    raft: Arc::new(raft),
-  };
-
-  server.start_raft_service().await?;
-
-  tokio::select! {
-      res = server.run() => {
-          if let Err(err) = res {
-              error!(cause = %err, "failed to accept");
-          }
-      }
-      _ = shutdown => {
-          // The shutdown signal has been received.
-          info!("coredb server shutting down");
-      }
-  }
-
-  server.shutdown().await;
-
-  Ok(())
 }

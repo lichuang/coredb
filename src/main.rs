@@ -11,6 +11,7 @@ mod log_wrappers;
 mod server;
 // mod storage;
 mod errors;
+mod types;
 mod util;
 
 use config::Config;

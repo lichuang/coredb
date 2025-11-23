@@ -1,8 +1,5 @@
 use std::fmt;
 
-use serde::Deserialize;
-use serde::Serialize;
-
 use crate::raft::protobuf as pb;
 
 openraft::declare_raft_types!(
@@ -88,7 +85,6 @@ pub enum OpenRaftError {
 
 impl fmt::Debug for OpenRaftError {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    // 使用 match 语句为每一种错误变体提供描述
     match self {
       OpenRaftError::Infallible(err) => write!(f, "{}", err),
       OpenRaftError::Fatal(err) => write!(f, "{}", err),

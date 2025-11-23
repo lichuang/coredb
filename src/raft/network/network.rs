@@ -13,17 +13,7 @@ use crate::raft::protobuf as pb;
 use crate::raft::protobuf::VoteRequest as PbVoteRequest;
 use crate::raft::protobuf::VoteResponse as PbVoteResponse;
 use crate::raft::protobuf::raft_service_client::RaftServiceClient;
-use crate::raft::types::raft_types::AppendEntriesRequest;
-use crate::raft::types::raft_types::AppendEntriesResponse;
-use crate::raft::types::raft_types::Node;
-use crate::raft::types::raft_types::RPCError;
-use crate::raft::types::raft_types::Snapshot;
-use crate::raft::types::raft_types::SnapshotResponse;
-use crate::raft::types::raft_types::StreamingError;
-use crate::raft::types::raft_types::TypeConfig;
-use crate::raft::types::raft_types::Vote;
-use crate::raft::types::raft_types::VoteRequest;
-use crate::raft::types::raft_types::VoteResponse;
+use crate::types::raft::*;
 
 /// Provides the networking layer for Raft nodes to communicate with each other.
 pub struct NetworkFactory {}

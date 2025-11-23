@@ -2,8 +2,6 @@ use tonic::transport::channel::Channel;
 use tracing::debug;
 
 use super::endpoint::Endpoint;
-use super::raft_types::NodeId;
-use super::raft_types::protobuf::raft_service_client::RaftServiceClient;
 use crate::config::GrpcConfig;
 
 /// Defines the API of the client to a raft node.

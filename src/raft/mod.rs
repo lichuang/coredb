@@ -1,7 +1,6 @@
 mod endpoint;
 mod network;
 mod store;
-pub mod types;
 // mod raft_client;
 
 #[allow(clippy::all)]
@@ -13,11 +12,11 @@ use std::sync::Arc;
 
 use network::NetworkFactory;
 pub use network::RaftServiceImpl;
-pub use types::raft_types::*;
 
 use crate::config::Config;
 use crate::errors::Result;
 pub(crate) use crate::raft::store::new_storage;
+pub use crate::types::raft::raft_types::*;
 // pub use storage::new_raft_storage;
 
 pub async fn new_raft(config: &Config) -> Result<Raft> {

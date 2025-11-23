@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use openraft::Membership;
 
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::TypeConfig;
 
 impl From<pb::Membership> for Membership<TypeConfig> {
   fn from(value: pb::Membership) -> Self {

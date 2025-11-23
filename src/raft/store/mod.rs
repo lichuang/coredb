@@ -7,7 +7,7 @@ use rocksdb::DB;
 use rocksdb::Options;
 use state_machine::RocksStateMachine;
 
-use super::types::raft_types::TypeConfig;
+use crate::types::raft::TypeConfig;
 
 mod log_store;
 mod meta;

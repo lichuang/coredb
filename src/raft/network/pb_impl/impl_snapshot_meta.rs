@@ -1,5 +1,5 @@
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::SnapshotMeta;
+use crate::types::raft::SnapshotMeta;
 
 impl From<SnapshotMeta> for pb::SnapshotMeta {
   fn from(meta: SnapshotMeta) -> Self {

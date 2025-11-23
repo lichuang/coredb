@@ -3,8 +3,8 @@ use std::fmt;
 use openraft::vote::RaftVote;
 
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::LeaderId;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::LeaderId;
+use crate::types::raft::TypeConfig;
 
 impl RaftVote<TypeConfig> for pb::Vote {
   fn from_leader_id(leader_id: LeaderId, committed: bool) -> Self {

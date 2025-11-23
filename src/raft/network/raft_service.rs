@@ -13,9 +13,9 @@ use crate::raft::protobuf as pb;
 use crate::raft::protobuf::VoteRequest;
 use crate::raft::protobuf::VoteResponse;
 use crate::raft::protobuf::raft_service_server::RaftService;
-use crate::raft::types::raft_types::Raft;
-use crate::raft::types::raft_types::SnapshotMeta;
-use crate::raft::types::raft_types::StoredMembership;
+use crate::types::raft::Raft;
+use crate::types::raft::SnapshotMeta;
+use crate::types::raft::StoredMembership;
 
 /// Internal gRPC service implementation for Raft protocol communications.
 /// This service handles the core Raft consensus protocol operations between cluster nodes.

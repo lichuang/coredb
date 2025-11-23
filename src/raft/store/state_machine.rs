@@ -32,11 +32,11 @@ use tokio::task::spawn_blocking;
 
 use super::log_store::RocksLogStore;
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_codec::RaftCodec;
-use crate::raft::types::raft_types::Entry;
-use crate::raft::types::raft_types::RaftSnapshotData;
-use crate::raft::types::raft_types::Response;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::Entry;
+use crate::types::raft::RaftCodec;
+use crate::types::raft::RaftSnapshotData;
+use crate::types::raft::Response;
+use crate::types::raft::TypeConfig;
 
 /// State machine backed by RocksDB for full persistence.
 /// All application data is stored directly in the `sm_data` column family.

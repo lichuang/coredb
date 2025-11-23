@@ -8,7 +8,7 @@ use openraft::alias::VoteOf;
 use prost::Message;
 
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::TypeConfig;
 
 pub(crate) trait RaftCodec {
   fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>

@@ -7,7 +7,7 @@ use openraft::entry::RaftEntry;
 use openraft::entry::RaftPayload;
 
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::TypeConfig;
 
 impl fmt::Display for pb::Entry {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

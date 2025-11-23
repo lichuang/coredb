@@ -1,5 +1,5 @@
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::LogId;
+use crate::types::raft::LogId;
 
 impl From<LogId> for pb::LogId {
   fn from(log_id: LogId) -> Self {

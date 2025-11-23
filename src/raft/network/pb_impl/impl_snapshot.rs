@@ -1,5 +1,5 @@
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::Snapshot;
+use crate::types::raft::Snapshot;
 
 impl From<Snapshot> for pb::SnapshotFile {
   fn from(snapshot: Snapshot) -> Self {

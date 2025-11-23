@@ -1,5 +1,5 @@
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::VoteResponse;
+use crate::types::raft::VoteResponse;
 
 impl From<VoteResponse> for pb::VoteResponse {
   fn from(vote_resp: VoteResponse) -> Self {

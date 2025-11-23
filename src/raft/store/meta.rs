@@ -5,8 +5,8 @@ use openraft::StorageError;
 use openraft::alias::LogIdOf;
 use openraft::alias::VoteOf;
 
-use crate::raft::types::raft_codec::RaftCodec;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::RaftCodec;
+use crate::types::raft::TypeConfig;
 
 /// Defines metadata key and value
 pub(crate) trait StoreMeta {

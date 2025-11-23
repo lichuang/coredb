@@ -1,7 +1,7 @@
 use openraft::StoredMembership;
 
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::TypeConfig;
 
 impl From<pb::StoredMembership> for StoredMembership<TypeConfig> {
   fn from(value: pb::StoredMembership) -> Self {

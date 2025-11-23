@@ -25,10 +25,10 @@ use tokio::task::spawn_blocking;
 use super::meta::StoreMeta;
 use crate::raft::protobuf as pb;
 use crate::raft::store::meta::LastPurged;
-use crate::raft::types::raft_codec::RaftCodec;
-use crate::raft::types::raft_codec::read_logs_err;
-use crate::raft::types::raft_types::LogState;
-use crate::raft::types::raft_types::TypeConfig;
+use crate::types::raft::LogState;
+use crate::types::raft::RaftCodec;
+use crate::types::raft::TypeConfig;
+use crate::types::raft::read_logs_err;
 
 #[derive(Debug, Clone)]
 pub struct RocksLogStore<C>
@@ -95,7 +95,7 @@ impl RaftLogReader<TypeConfig> for RocksLogStore<TypeConfig> {
   async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + OptionalSend>(
     &mut self,
     range: RB,
-  ) -> Result<Vec<crate::raft::types::raft_types::Entry>, StorageError<TypeConfig>> {
+  ) -> Result<Vec<crate::types::raft::Entry>, StorageError<TypeConfig>> {
     let start = match range.start_bound() {
       std::ops::Bound::Included(x) => id_to_bin(*x),
       std::ops::Bound::Excluded(x) => id_to_bin(*x + 1),

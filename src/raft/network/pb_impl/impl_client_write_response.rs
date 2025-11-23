@@ -1,5 +1,5 @@
 use crate::raft::protobuf as pb;
-use crate::raft::types::raft_types::ClientWriteResponse;
+use crate::types::raft::ClientWriteResponse;
 
 impl From<pb::ClientWriteResponse> for ClientWriteResponse {
   fn from(r: pb::ClientWriteResponse) -> Self {

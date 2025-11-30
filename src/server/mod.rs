@@ -1,5 +1,4 @@
 mod connection;
-mod endpoint;
 mod kv_api;
 mod server;
 mod shutdown;

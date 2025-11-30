@@ -1,4 +1,3 @@
-mod endpoint;
 mod network;
 mod store;
 // mod raft_client;

@@ -1,5 +1,7 @@
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
 
 use anyerror::AnyError;
 use tokio::net::TcpListener;
@@ -9,6 +11,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use super::shutdown::Shutdown;
 use super::store::RaftStore;
@@ -79,21 +82,15 @@ impl Server {
     let ip_port = match ipv4_addr {
       Ok(addr) => format!("{}:{}", addr, port),
       Err(_) => {
-        let resolver = DNSResolver::instance()
-          .map_err(|e| Error::Network(format!("get dns resolver instance error: {}", e)))?;
-        let ip_addrs = resolver
-          .resolve(host.clone())
-          .await
-          .map_err(|e| Error::Network(format!("resolve addr {} error: {}", host, e)))?;
+        let resolver = DNSResolver::instance()?;
+        let ip_addrs = resolver.resolve(host.clone()).await?;
         format!("{}:{}", ip_addrs[0], port)
       }
     };
 
     info!("about to start raft grpc on: {}", ip_port);
 
-    let socket_addr = ip_port
-      .parse::<std::net::SocketAddr>()
-      .map_err(|e| Error::Network(format!("Parse addr {} error: {}", ip_port, e)))?;
+    let socket_addr = ip_port.parse::<std::net::SocketAddr>()?;
     let node_id = config.node_id;
 
     let srv = tonic::transport::Server::builder().add_service(raft_server);
@@ -118,6 +115,32 @@ impl Server {
     jh.push(h);
 
     Ok(())
+  }
+
+  async fn get_leader(&self) -> Result<Option<NodeId>> {
+    let mut rx = self.raft.metrics();
+
+    let mut expire_at: Option<Instant> = None;
+
+    loop {
+      if let Some(l) = rx.borrow().current_leader {
+        return Ok(Some(l));
+      }
+
+      if expire_at.is_none() {
+        let timeout = Duration::from_millis(2_000);
+        expire_at = Some(Instant::now() + timeout);
+      }
+      if Some(Instant::now()) > expire_at {
+        warn!("timeout waiting for a leader");
+        return Ok(None);
+      }
+
+      // Wait for metrics to change and re-fetch the leader id.
+      //
+      // Note that when it returns, `changed()` will mark the most recent value as **seen**.
+      rx.changed().await?;
+    }
   }
 
   pub async fn get_node_endpoint(&self, node_id: &NodeId) -> Result<Option<String>> {

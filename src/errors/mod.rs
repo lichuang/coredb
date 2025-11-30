@@ -20,11 +20,23 @@ pub enum Error {
   #[error("Parse client request error: {0}")]
   ParseRequest(#[from] ParseError),
 
-  #[error("Dns Parse error: {0}")]
-  DnsParse(String),
-
   #[error("Network error: {0}")]
-  Network(String),
+  Network(NetworkError),
+
+  #[error("Tokio Runtime error: {0}")]
+  TokioRuntime(#[from] TokioRuntimeError),
+}
+
+impl Error {
+  pub fn dns_parse_error(e: String) -> Self {
+    Self::Network(NetworkError::DnsParse(e))
+  }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+mod network_errors;
+pub use network_errors::NetworkError;
+
+mod runtime_errors;
+pub use runtime_errors::TokioRuntimeError;

@@ -27,7 +27,7 @@ pub struct DNSResolver {
 
 static INSTANCE: LazyLock<Result<Arc<DNSResolver>>> =
   LazyLock::new(|| match TokioResolver::builder_tokio() {
-    Err(error) => Err(Error::DnsParse(format!(
+    Err(error) => Err(Error::dns_parse_error(format!(
       "DNS resolver create error: {}",
       error
     ))),
@@ -40,10 +40,7 @@ impl DNSResolver {
   pub fn instance() -> Result<Arc<DNSResolver>> {
     match INSTANCE.as_ref() {
       Ok(resolver) => Ok(resolver.clone()),
-      Err(error) => Err(Error::DnsParse(format!(
-        "DNS resolver create error: {}",
-        error
-      ))),
+      Err(error) => Err(Error::dns_parse_error(error.to_string())),
     }
   }
 
@@ -51,7 +48,7 @@ impl DNSResolver {
     let hostname = hostname.into();
     match self.inner.lookup_ip(hostname.clone()).await {
       Ok(lookup_ip) => Ok(lookup_ip.iter().collect::<Vec<_>>()),
-      Err(error) => Err(Error::DnsParse(format!(
+      Err(error) => Err(Error::dns_parse_error(format!(
         "Cannot lookup ip {} : {}",
         hostname, error
       ))),

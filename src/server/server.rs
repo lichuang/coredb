@@ -11,10 +11,12 @@ use tracing::error;
 use tracing::info;
 
 use super::shutdown::Shutdown;
+use super::store::RaftStore;
 use crate::config::Config;
 use crate::config::GrpcConfig;
 use crate::errors::Error;
 use crate::errors::Result;
+use crate::raft::NodeId;
 use crate::raft::Raft;
 use crate::raft::RaftServiceImpl;
 use crate::server::connection::Connection;
@@ -34,6 +36,8 @@ pub struct Server {
   pub join_handles: Mutex<Vec<JoinHandle<Result<(), AnyError>>>>,
 
   pub raft: Arc<Raft>,
+
+  pub raft_store: RaftStore,
 }
 
 impl Server {
@@ -114,6 +118,10 @@ impl Server {
     jh.push(h);
 
     Ok(())
+  }
+
+  pub async fn get_node_endpoint(&self, node_id: &NodeId) -> Result<Option<String>> {
+    Ok(self.raft_store.get_node(node_id)?.map(|n| n.endpoint))
   }
 
   pub async fn shutdown(&self) {

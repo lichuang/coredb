@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use log_store::RocksLogStore;
+pub use log_store::RocksLogStore;
 use rocksdb::ColumnFamilyDescriptor;
 use rocksdb::DB;
 use rocksdb::Options;
-use state_machine::RocksStateMachine;
+pub use state_machine::RocksStateMachine;
 
 use crate::types::raft::TypeConfig;
 

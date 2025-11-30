@@ -65,7 +65,7 @@ pub type ClientWriteResponse = openraft::raft::ClientWriteResponse<TypeConfig>;
 
 pub type RaftSnapshotData = Vec<(Vec<u8>, Vec<u8>)>;
 
-#[derive(thiserror::Error)]
+#[derive(thiserror::Error, Debug)]
 pub enum OpenRaftError {
   #[error("{0}")]
   Infallible(#[from] Infallible),
@@ -81,16 +81,13 @@ pub enum OpenRaftError {
 
   #[error("{0}")]
   StreamingError(#[from] StreamingError),
+
+  #[error("{0}")]
+  StorageError(#[from] StorageError),
 }
 
-impl fmt::Debug for OpenRaftError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      OpenRaftError::Infallible(err) => write!(f, "{}", err),
-      OpenRaftError::Fatal(err) => write!(f, "{}", err),
-      OpenRaftError::RaftError(err) => write!(f, "{}", err),
-      OpenRaftError::RPCError(err) => write!(f, "{}", err),
-      OpenRaftError::StreamingError(err) => write!(f, "{}", err),
-    }
+impl From<StorageError> for crate::errors::Error {
+  fn from(e: StorageError) -> Self {
+    crate::errors::Error::OpenRaftError(OpenRaftError::StorageError(e))
   }
 }

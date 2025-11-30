@@ -73,7 +73,7 @@ impl RocksStateMachine {
   }
 
   #[allow(clippy::type_complexity)]
-  fn get_meta(
+  pub fn get_meta(
     &self,
   ) -> Result<(Option<LogId<TypeConfig>>, StoredMembership<TypeConfig>), StorageError<TypeConfig>>
   {

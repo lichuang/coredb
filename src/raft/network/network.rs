@@ -47,7 +47,7 @@ impl NetworkConnection {
 
   /// Creates a gRPC channel to the target node.
   async fn create_channel(&self) -> Result<Channel, RPCError> {
-    let server_addr = &self.target_node.rpc_addr;
+    let server_addr = &self.target_node.endpoint;
     let channel = Channel::builder(format!("http://{}", server_addr).parse().unwrap())
       .connect()
       .await

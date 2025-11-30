@@ -10,7 +10,7 @@ message Node {
   // Unique identifier for the node
   uint64 node_id = 1;
   // RPC address for node communication
-  string rpc_addr = 2;
+  string endpoint = 2;
   string name = 3;
 }
 

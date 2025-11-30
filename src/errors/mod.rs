@@ -5,9 +5,6 @@ pub enum Error {
   #[error("IO error: {0}")]
   Io(#[from] std::io::Error),
 
-  #[error("Raft error")]
-  Raft(#[from] crate::raft::RaftError),
-
   #[error("Raft fatal error")]
   OpenRaftError(#[from] crate::raft::OpenRaftError),
 

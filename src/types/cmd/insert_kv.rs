@@ -6,22 +6,20 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::kv_meta::KVMeta;
-use crate::types::operation::Operation;
 use crate::types::with::With;
 
 /// Update or insert a general purpose kv store
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, deepsize::DeepSizeOf)]
-pub struct UpsertKV {
+pub struct InsertKV {
   pub key: String,
 
-  /// The value to set. A `None` indicates to delete it.
-  pub value: Operation<Vec<u8>>,
+  pub value: Vec<u8>,
 
   /// Meta data of a value.
   pub meta: Option<KVMeta>,
 }
 
-impl fmt::Display for UpsertKV {
+impl fmt::Display for InsertKV {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     write!(
       f,
@@ -33,36 +31,12 @@ impl fmt::Display for UpsertKV {
   }
 }
 
-impl UpsertKV {
-  pub fn new(key: impl ToString, value: Operation<Vec<u8>>, meta: Option<KVMeta>) -> Self {
+impl InsertKV {
+  pub fn new(key: impl ToString, value: Vec<u8>, meta: Option<KVMeta>) -> Self {
     Self {
       key: key.to_string(),
       value,
       meta,
-    }
-  }
-
-  pub fn insert(key: impl ToString, value: &[u8]) -> Self {
-    Self {
-      key: key.to_string(),
-      value: Operation::Update(value.to_vec()),
-      meta: None,
-    }
-  }
-
-  pub fn update(key: impl ToString, value: &[u8]) -> Self {
-    Self {
-      key: key.to_string(),
-      value: Operation::Update(value.to_vec()),
-      meta: None,
-    }
-  }
-
-  pub fn delete(key: impl ToString) -> Self {
-    Self {
-      key: key.to_string(),
-      value: Operation::Delete,
-      meta: None,
     }
   }
 
@@ -77,7 +51,7 @@ impl UpsertKV {
   }
 }
 
-impl With<KVMeta> for UpsertKV {
+impl With<KVMeta> for InsertKV {
   fn with(mut self, meta: KVMeta) -> Self {
     self.meta = Some(meta);
     self

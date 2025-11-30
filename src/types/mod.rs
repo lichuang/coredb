@@ -3,9 +3,9 @@ pub mod protobuf {
   tonic::include_proto!("openraftpb");
 }
 
-mod cmd;
+pub mod cmd;
 
-mod log_entry;
+pub mod log_entry;
 mod message;
 mod operation;
 pub mod raft;

@@ -9,10 +9,10 @@ use tonic::Status;
 use tonic::Streaming;
 use tracing::debug;
 
-use crate::raft::protobuf as pb;
-use crate::raft::protobuf::VoteRequest;
-use crate::raft::protobuf::VoteResponse;
-use crate::raft::protobuf::raft_service_server::RaftService;
+use crate::types::protobuf as pb;
+use crate::types::protobuf::VoteRequest;
+use crate::types::protobuf::VoteResponse;
+use crate::types::protobuf::raft_service_server::RaftService;
 use crate::types::raft::Raft;
 use crate::types::raft::SnapshotMeta;
 use crate::types::raft::StoredMembership;

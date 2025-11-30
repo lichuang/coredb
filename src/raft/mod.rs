@@ -3,11 +3,6 @@ mod network;
 mod store;
 // mod raft_client;
 
-#[allow(clippy::all)]
-pub mod protobuf {
-  tonic::include_proto!("openraftpb");
-}
-
 use std::sync::Arc;
 
 use network::NetworkFactory;

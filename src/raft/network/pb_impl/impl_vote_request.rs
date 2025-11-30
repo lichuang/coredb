@@ -1,4 +1,4 @@
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::VoteRequest;
 
 impl From<VoteRequest> for pb::VoteRequest {

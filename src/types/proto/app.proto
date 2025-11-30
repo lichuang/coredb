@@ -2,8 +2,8 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 import "google/protobuf/wrappers.proto";
-import "src/raft/proto/raft.proto";
-import "src/raft/proto/app_types.proto";
+import "src/types/proto/raft.proto";
+import "src/types/proto/app_types.proto";
 
 package openraftpb;
 

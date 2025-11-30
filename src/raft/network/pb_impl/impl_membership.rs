@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 
 use openraft::Membership;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::TypeConfig;
 
 impl From<pb::Membership> for Membership<TypeConfig> {

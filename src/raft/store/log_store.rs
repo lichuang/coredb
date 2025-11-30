@@ -23,8 +23,8 @@ use rocksdb::Direction;
 use tokio::task::spawn_blocking;
 
 use super::meta::StoreMeta;
-use crate::raft::protobuf as pb;
 use crate::raft::store::meta::LastPurged;
+use crate::types::protobuf as pb;
 use crate::types::raft::LogState;
 use crate::types::raft::RaftCodec;
 use crate::types::raft::TypeConfig;

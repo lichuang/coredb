@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 import "google/protobuf/empty.proto";
-import "src/raft/proto/app_types.proto";
+import "src/types/proto/app_types.proto";
 
 package openraftpb;
 

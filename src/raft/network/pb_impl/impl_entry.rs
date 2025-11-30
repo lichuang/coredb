@@ -6,7 +6,7 @@ use openraft::alias::LogIdOf;
 use openraft::entry::RaftEntry;
 use openraft::entry::RaftPayload;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::TypeConfig;
 
 impl fmt::Display for pb::Entry {

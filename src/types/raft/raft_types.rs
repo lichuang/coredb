@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 
 openraft::declare_raft_types!(
     pub TypeConfig:

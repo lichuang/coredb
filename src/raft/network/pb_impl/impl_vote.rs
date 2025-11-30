@@ -2,7 +2,7 @@ use std::fmt;
 
 use openraft::vote::RaftVote;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::LeaderId;
 use crate::types::raft::TypeConfig;
 

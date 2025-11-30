@@ -1,5 +1,5 @@
-use crate::raft::protobuf as pb;
-use crate::raft::protobuf::snapshot_request::Payload;
+use crate::types::protobuf as pb;
+use crate::types::protobuf::snapshot_request::Payload;
 
 impl pb::SnapshotRequest {
   pub fn into_meta(self) -> Option<pb::SnapshotRequestMeta> {

@@ -17,8 +17,8 @@ use crate::errors::Error;
 use crate::errors::Result;
 use crate::raft::Raft;
 use crate::raft::RaftServiceImpl;
-use crate::raft::protobuf::raft_service_server::RaftServiceServer;
 use crate::server::connection::Connection;
+use crate::types::protobuf::raft_service_server::RaftServiceServer;
 use crate::util::DNSResolver;
 
 pub struct Server {

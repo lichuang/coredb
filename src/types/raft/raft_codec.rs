@@ -7,7 +7,7 @@ use openraft::alias::LogIdOf;
 use openraft::alias::VoteOf;
 use prost::Message;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::TypeConfig;
 
 pub(crate) trait RaftCodec {
@@ -19,7 +19,7 @@ pub(crate) trait RaftCodec {
 impl RaftCodec for LogIdOf<TypeConfig> {
   fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
   where Self: Sized {
-    let log_id = crate::raft::protobuf::LogId::decode(buf).map_err(read_logs_err)?;
+    let log_id = crate::types::protobuf::LogId::decode(buf).map_err(read_logs_err)?;
 
     Ok(Self {
       leader_id: log_id.term,
@@ -28,7 +28,7 @@ impl RaftCodec for LogIdOf<TypeConfig> {
   }
 
   fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>> {
-    let log_id = crate::raft::protobuf::LogId {
+    let log_id = crate::types::protobuf::LogId {
       term: self.leader_id,
       index: self.index,
     };
@@ -40,7 +40,7 @@ impl RaftCodec for LogIdOf<TypeConfig> {
 impl RaftCodec for VoteOf<TypeConfig> {
   fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
   where Self: Sized {
-    Ok(crate::raft::protobuf::Vote::decode(buf).map_err(read_logs_err)?)
+    Ok(crate::types::protobuf::Vote::decode(buf).map_err(read_logs_err)?)
   }
 
   fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>> {

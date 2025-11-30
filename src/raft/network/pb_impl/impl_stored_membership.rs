@@ -1,6 +1,6 @@
 use openraft::StoredMembership;
 
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::TypeConfig;
 
 impl From<pb::StoredMembership> for StoredMembership<TypeConfig> {

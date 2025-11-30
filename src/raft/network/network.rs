@@ -9,10 +9,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
 use crate::raft::NodeId;
-use crate::raft::protobuf as pb;
-use crate::raft::protobuf::VoteRequest as PbVoteRequest;
-use crate::raft::protobuf::VoteResponse as PbVoteResponse;
-use crate::raft::protobuf::raft_service_client::RaftServiceClient;
+use crate::types::protobuf as pb;
+use crate::types::protobuf::VoteRequest as PbVoteRequest;
+use crate::types::protobuf::VoteResponse as PbVoteResponse;
+use crate::types::protobuf::raft_service_client::RaftServiceClient;
 use crate::types::raft::*;
 
 /// Provides the networking layer for Raft nodes to communicate with each other.

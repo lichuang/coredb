@@ -1,4 +1,4 @@
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::ClientWriteResponse;
 
 impl From<pb::ClientWriteResponse> for ClientWriteResponse {

@@ -3,9 +3,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut config = prost_build::Config::new();
   config.protoc_arg("--experimental_allow_proto3_optional");
   let proto_files = [
-    "src/raft/proto/raft.proto",
-    "src/raft/proto/app_types.proto",
-    "src/raft/proto/app.proto",
+    "src/types/proto/raft.proto",
+    "src/types/proto/app_types.proto",
+    "src/types/proto/app.proto",
   ];
 
   tonic_build::configure()

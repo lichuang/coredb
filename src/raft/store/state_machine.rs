@@ -31,7 +31,7 @@ use rocksdb::Options;
 use tokio::task::spawn_blocking;
 
 use super::log_store::RocksLogStore;
-use crate::raft::protobuf as pb;
+use crate::types::protobuf as pb;
 use crate::types::raft::Entry;
 use crate::types::raft::RaftCodec;
 use crate::types::raft::RaftSnapshotData;

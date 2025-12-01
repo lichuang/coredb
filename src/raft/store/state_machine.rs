@@ -156,9 +156,13 @@ impl RaftSnapshotBuilder<TypeConfig> for RocksStateMachine {
     // .map_err(|e| StorageError::write_snapshot(Some(meta.signature()), &e))?;
 
     // Return snapshot with data-only for backward compatibility with the data field
-    let snapshot: pb::SnapshotData = data.into();
-
-    Ok(Snapshot { meta, snapshot })
+    match data {
+      Err(e) => Err(e),
+      Ok(data) => {
+        let snapshot: pb::SnapshotData = data.into();
+        Ok(Snapshot { meta, snapshot })
+      }
+    }
   }
 }
 

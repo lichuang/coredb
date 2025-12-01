@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::io;
 use std::marker::PhantomData;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -9,7 +10,6 @@ use byteorder::WriteBytesExt;
 use openraft::OptionalSend;
 use openraft::RaftLogReader;
 use openraft::RaftTypeConfig;
-use openraft::StorageError;
 use openraft::alias::EntryOf;
 use openraft::alias::LogIdOf;
 use openraft::alias::VoteOf;
@@ -62,7 +62,7 @@ impl RocksLogStore<TypeConfig> {
   /// Get a store metadata.
   ///
   /// It returns `None` if the store does not have such a metadata stored.
-  fn get_meta<M: StoreMeta>(&self) -> Result<Option<M::Value>, StorageError<TypeConfig>> {
+  fn get_meta<M: StoreMeta>(&self) -> Result<Option<M::Value>, io::Error> {
     let bytes = self
       .db
       .get_cf(self.cf_meta(), M::KEY)
@@ -78,7 +78,7 @@ impl RocksLogStore<TypeConfig> {
   }
 
   /// Save a store metadata.
-  fn put_meta<M: StoreMeta>(&self, value: &M::Value) -> Result<(), StorageError<TypeConfig>> {
+  fn put_meta<M: StoreMeta>(&self, value: &M::Value) -> Result<(), io::Error> {
     // let json_value = serde_json::to_vec(value).map_err(|e| M::write_err(value, e))?;
     let encode_valude = value.encode_to()?;
 
@@ -95,7 +95,7 @@ impl RaftLogReader<TypeConfig> for RocksLogStore<TypeConfig> {
   async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + OptionalSend>(
     &mut self,
     range: RB,
-  ) -> Result<Vec<crate::types::raft::Entry>, StorageError<TypeConfig>> {
+  ) -> Result<Vec<crate::types::raft::Entry>, io::Error> {
     let start = match range.start_bound() {
       std::ops::Bound::Included(x) => id_to_bin(*x),
       std::ops::Bound::Excluded(x) => id_to_bin(*x + 1),
@@ -125,7 +125,7 @@ impl RaftLogReader<TypeConfig> for RocksLogStore<TypeConfig> {
     Ok(res)
   }
 
-  async fn read_vote(&mut self) -> Result<Option<VoteOf<TypeConfig>>, StorageError<TypeConfig>> {
+  async fn read_vote(&mut self) -> Result<Option<VoteOf<TypeConfig>>, io::Error> {
     self.get_meta::<super::meta::Vote>()
   }
 }
@@ -134,7 +134,7 @@ impl RaftLogReader<TypeConfig> for RocksLogStore<TypeConfig> {
 impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
   type LogReader = Self;
 
-  async fn get_log_state(&mut self) -> Result<LogState, StorageError<TypeConfig>> {
+  async fn get_log_state(&mut self) -> Result<LogState, io::Error> {
     let last = self
       .db
       .iterator_cf(self.cf_logs(), rocksdb::IteratorMode::End)
@@ -166,15 +166,15 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
     self.clone()
   }
 
-  async fn save_vote(&mut self, vote: &VoteOf<TypeConfig>) -> Result<(), StorageError<TypeConfig>> {
+  async fn save_vote(&mut self, vote: &VoteOf<TypeConfig>) -> Result<(), io::Error> {
     self.put_meta::<super::meta::Vote>(vote)?;
 
     // Vote must be persisted to disk before returning.
     let db = self.db.clone();
     spawn_blocking(move || db.flush_wal(true))
       .await
-      .map_err(|e| StorageError::write_vote(&std::io::Error::other(e.to_string())))?
-      .map_err(|e| StorageError::write_vote(&e))?;
+      .map_err(read_logs_err)?
+      .map_err(read_logs_err)?;
 
     Ok(())
   }
@@ -183,7 +183,7 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
     &mut self,
     entries: I,
     callback: IOFlushed<TypeConfig>,
-  ) -> Result<(), StorageError<TypeConfig>>
+  ) -> Result<(), io::Error>
   where
     I: IntoIterator<Item = EntryOf<TypeConfig>> + Send,
   {
@@ -192,7 +192,7 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
       self
         .db
         .put_cf(self.cf_logs(), id, entry.encode_to_vec())
-        .map_err(|e| StorageError::write_logs(&e))?;
+        .map_err(read_logs_err)?;
     }
 
     // Make sure the logs are persisted to disk before invoking the callback.
@@ -210,10 +210,7 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
     Ok(())
   }
 
-  async fn truncate(
-    &mut self,
-    log_id: LogIdOf<TypeConfig>,
-  ) -> Result<(), StorageError<TypeConfig>> {
+  async fn truncate(&mut self, log_id: LogIdOf<TypeConfig>) -> Result<(), io::Error> {
     tracing::debug!("truncate: [{:?}, +oo)", log_id);
 
     let from = id_to_bin(log_id.index());
@@ -221,13 +218,13 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
     self
       .db
       .delete_range_cf(self.cf_logs(), &from, &to)
-      .map_err(|e| StorageError::write_logs(&e))?;
+      .map_err(read_logs_err)?;
 
     // Truncating does not need to be persisted.
     Ok(())
   }
 
-  async fn purge(&mut self, log_id: LogIdOf<TypeConfig>) -> Result<(), StorageError<TypeConfig>> {
+  async fn purge(&mut self, log_id: LogIdOf<TypeConfig>) -> Result<(), io::Error> {
     tracing::debug!("delete_log: [0, {:?}]", log_id);
 
     // Write the last-purged log id before purging the logs.
@@ -240,7 +237,7 @@ impl RaftLogStorage<TypeConfig> for RocksLogStore<TypeConfig> {
     self
       .db
       .delete_range_cf(self.cf_logs(), &from, &to)
-      .map_err(|e| StorageError::write_logs(&e))?;
+      .map_err(read_logs_err)?;
 
     // Purging does not need to be persistent.
     Ok(())

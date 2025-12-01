@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::io;
 
 use openraft::Membership;
 use openraft::StorageError;
@@ -11,13 +12,13 @@ use crate::types::protobuf as pb;
 use crate::types::raft::TypeConfig;
 
 pub(crate) trait RaftCodec {
-  fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
+  fn decode_from(buf: &[u8]) -> Result<Self, io::Error>
   where Self: Sized;
-  fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>>;
+  fn encode_to(&self) -> Result<Vec<u8>, io::Error>;
 }
 
 impl RaftCodec for LogIdOf<TypeConfig> {
-  fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
+  fn decode_from(buf: &[u8]) -> Result<Self, io::Error>
   where Self: Sized {
     let log_id = crate::types::protobuf::LogId::decode(buf).map_err(read_logs_err)?;
 
@@ -27,7 +28,7 @@ impl RaftCodec for LogIdOf<TypeConfig> {
     })
   }
 
-  fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>> {
+  fn encode_to(&self) -> Result<Vec<u8>, io::Error> {
     let log_id = crate::types::protobuf::LogId {
       term: self.leader_id,
       index: self.index,
@@ -38,18 +39,18 @@ impl RaftCodec for LogIdOf<TypeConfig> {
 }
 
 impl RaftCodec for VoteOf<TypeConfig> {
-  fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
+  fn decode_from(buf: &[u8]) -> Result<Self, io::Error>
   where Self: Sized {
     Ok(crate::types::protobuf::Vote::decode(buf).map_err(read_logs_err)?)
   }
 
-  fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>> {
+  fn encode_to(&self) -> Result<Vec<u8>, io::Error> {
     Ok(self.encode_to_vec())
   }
 }
 
 impl RaftCodec for StoredMembership<TypeConfig> {
-  fn decode_from(buf: &[u8]) -> Result<Self, StorageError<TypeConfig>>
+  fn decode_from(buf: &[u8]) -> Result<Self, io::Error>
   where Self: Sized {
     let store_membership = pb::StoredMembership::decode(buf).map_err(read_logs_err)?;
 
@@ -63,7 +64,7 @@ impl RaftCodec for StoredMembership<TypeConfig> {
     ))
   }
 
-  fn encode_to(&self) -> Result<Vec<u8>, StorageError<TypeConfig>> {
+  fn encode_to(&self) -> Result<Vec<u8>, io::Error> {
     let store_membership = pb::StoredMembership {
       log_id: if let Some(log_id) = self.log_id() {
         Some(log_id.to_owned().into())
@@ -77,6 +78,7 @@ impl RaftCodec for StoredMembership<TypeConfig> {
   }
 }
 
-pub fn read_logs_err(e: impl Error + 'static) -> StorageError<TypeConfig> {
-  StorageError::read_logs(&e)
+pub fn read_logs_err(e: impl Error + 'static) -> io::Error {
+  // StorageError::read_logs(&e)
+  io::Error::other(e.to_string())
 }

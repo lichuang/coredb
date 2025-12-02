@@ -9,16 +9,19 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
 
+use super::raft_leader::RaftLeader;
 use super::shutdown::Shutdown;
 use super::store::RaftStore;
 use crate::config::Config;
 use crate::config::GrpcConfig;
 use crate::errors::Error;
 use crate::errors::Result;
+use crate::raft::ForwardToLeader;
 use crate::raft::NodeId;
 use crate::raft::Raft;
 use crate::raft::RaftServiceImpl;
@@ -141,6 +144,27 @@ impl Server {
       // Note that when it returns, `changed()` will mark the most recent value as **seen**.
       rx.changed().await?;
     }
+  }
+
+  async fn assume_leader(&self) -> Result<RaftLeader<'_>, ForwardToLeader> {
+    let leader_id = self.get_leader().await.map_err(|e| {
+      error!("raft metrics rx closed: {}", e);
+      ForwardToLeader {
+        leader_id: None,
+        leader_node: None,
+      }
+    })?;
+
+    debug!("curr_leader_id: {:?}", leader_id);
+
+    if leader_id == Some(self.config.node_id) {
+      return Ok(RaftLeader::new(self));
+    }
+
+    Err(ForwardToLeader {
+      leader_id,
+      leader_node: None,
+    })
   }
 
   pub async fn get_node_endpoint(&self, node_id: &NodeId) -> Result<Option<String>> {

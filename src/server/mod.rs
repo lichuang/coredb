@@ -1,5 +1,6 @@
 mod connection;
 mod kv_api;
+mod raft_leader;
 mod server;
 mod shutdown;
 mod store;

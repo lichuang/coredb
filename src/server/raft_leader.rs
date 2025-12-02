@@ -6,6 +6,8 @@ use tracing::info;
 use super::server::Server;
 use crate::raft::ClientWriteError;
 use crate::raft::RaftError;
+use crate::raft::Request;
+use crate::raft::Response;
 use crate::types::applied_state::AppliedState;
 use crate::types::log_entry::LogEntry;
 
@@ -25,12 +27,9 @@ impl<'a> RaftLeader<'a> {
   /// Write a log through local raft node and return the states before and after applying the log.
   ///
   /// If the raft node is not a leader, it returns MetaRaftError::ForwardToLeader.
-  pub async fn write(
-    &self,
-    mut entry: LogEntry,
-  ) -> Result<AppliedState, RaftError<ClientWriteError>> {
+  pub async fn write(&self, mut entry: Request) -> Result<Response, RaftError<ClientWriteError>> {
     // Add consistent clock time to log entry.
-    entry.time_ms = Some(since_epoch().as_millis() as u64);
+    // entry.time_ms = Some(since_epoch().as_millis() as u64);
 
     // report metrics
     // let _guard = ProposalPending::guard();

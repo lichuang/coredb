@@ -5,6 +5,7 @@ pub mod protobuf {
 
 pub mod cmd;
 
+pub mod applied_state;
 pub mod log_entry;
 mod message;
 mod operation;

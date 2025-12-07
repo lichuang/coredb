@@ -172,8 +172,29 @@ message StateMachineData {
   Membership last_membership = 4;
 }
 
+message RaftRequest {
+  oneof data {
+    SetRequest set = 1; 
+  }
+}
+
+message RaftResponse {
+  string error = 1;
+}
+
+message ForwardRequest {
+  uint64 forward_to_leader = 1;
+  RaftRequest request = 2;
+}
+
+message ForwardResponse {
+  RaftResponse response = 1;
+}
+
 // InternalService handles internal Raft cluster communication
 service RaftService {
+  rpc Forward(RaftRequest) returns (RaftResponse);
+
   // Vote handles vote requests between Raft nodes during leader election
   rpc Vote(VoteRequest) returns (VoteResponse) {}
 

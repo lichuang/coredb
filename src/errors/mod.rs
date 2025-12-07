@@ -8,6 +8,9 @@ pub enum Error {
   #[error("Raft fatal error")]
   OpenRaftError(#[from] crate::raft::OpenRaftError),
 
+  #[error("Raft API error")]
+  RaftAPIError(#[from] RaftAPIError),
+
   #[error("Config error")]
   Config(#[from] crate::config::ConfigError),
 
@@ -40,3 +43,6 @@ pub use network_errors::NetworkError;
 
 mod runtime_errors;
 pub use runtime_errors::TokioRuntimeError;
+
+mod raft_api_errors;
+pub use raft_api_errors::RaftAPIError;

@@ -1,5 +1,6 @@
 mod connection;
 mod kv_api;
+mod raft_forwarder;
 mod raft_leader;
 mod server;
 mod shutdown;
@@ -9,7 +10,7 @@ use std::sync::Arc;
 
 pub use connection::Connection;
 pub use kv_api::KVApi;
-use server::Server;
+pub use server::Server;
 pub use shutdown::Shutdown;
 use store::RaftStore;
 use tokio::net::TcpListener;
@@ -36,7 +37,7 @@ pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
 
   let (tx, rx) = watch::channel::<()>(());
 
-  let mut server = Server {
+  let server = Arc::new(Server {
     listener,
     config,
     notify_shutdown,
@@ -45,12 +46,12 @@ pub async fn run(config: Config, shutdown: impl Future) -> Result<()> {
     join_handles: Mutex::new(Vec::new()),
     raft: Arc::new(raft),
     raft_store,
-  };
+  });
 
-  server.start().await?;
+  Server::start(server.clone()).await?;
 
   tokio::select! {
-      res = server.run() => {
+      res = Server::run(server.clone()) => {
           if let Err(err) = res {
               error!(cause = %err, "failed to accept");
           }

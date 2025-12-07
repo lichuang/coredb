@@ -9,11 +9,14 @@ use tonic::Status;
 use tonic::Streaming;
 use tracing::debug;
 
+use crate::server::Server;
 use crate::types::protobuf as pb;
+use crate::types::protobuf::ForwardRequest;
+use crate::types::protobuf::RaftRequest;
+use crate::types::protobuf::RaftResponse;
 use crate::types::protobuf::VoteRequest;
 use crate::types::protobuf::VoteResponse;
 use crate::types::protobuf::raft_service_server::RaftService;
-use crate::types::raft::Raft;
 use crate::types::raft::SnapshotMeta;
 use crate::types::raft::StoredMembership;
 
@@ -30,7 +33,7 @@ use crate::types::raft::StoredMembership;
 /// exposed to other trusted Raft cluster nodes, never to external clients.
 pub struct RaftServiceImpl {
   /// The local Raft node instance that this service operates on
-  raft: Arc<Raft>,
+  server: Arc<Server>,
 }
 
 impl RaftServiceImpl {
@@ -38,13 +41,31 @@ impl RaftServiceImpl {
   ///
   /// # Arguments
   /// * `raft_node` - The Raft node instance this service will operate on
-  pub fn new(raft: Arc<Raft>) -> Self {
-    RaftServiceImpl { raft }
+  pub fn new(server: Arc<Server>) -> Self {
+    RaftServiceImpl { server }
   }
 }
 
 #[tonic::async_trait]
 impl RaftService for RaftServiceImpl {
+  async fn forward(&self, request: Request<RaftRequest>) -> Result<Response<RaftResponse>, Status> {
+    async {
+      let forward_req = ForwardRequest {
+        forward_to_leader: 1,
+        request: Some(request.into_inner()),
+      };
+
+      let resp = self.server.handle_forwardable_request(forward_req).await;
+
+      let resp = resp
+        .map(|(_endpoint, forward_resp)| forward_resp)
+        .map_err(|e| Status::internal(format!("forward operation failed: {}", e)))?;
+
+      Ok(Response::new(resp.response.unwrap()))
+    }
+    .await
+  }
+
   /// Handles vote requests during leader election.
   ///
   /// # Arguments
@@ -61,6 +82,7 @@ impl RaftService for RaftServiceImpl {
     debug!("Processing vote request");
 
     let vote_resp = self
+      .server
       .raft
       .vote(request.into_inner().into())
       .await
@@ -89,6 +111,7 @@ impl RaftService for RaftServiceImpl {
     debug!("Processing append entries request");
 
     let append_resp = self
+      .server
       .raft
       .append_entries(request.into_inner().into())
       .await
@@ -157,6 +180,7 @@ impl RaftService for RaftServiceImpl {
 
     // Install the full snapshot
     let snapshot_resp = self
+      .server
       .raft
       .install_full_snapshot(vote, snapshot)
       .await

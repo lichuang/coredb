@@ -4,12 +4,15 @@ use std::time::SystemTime;
 use tracing::info;
 
 use super::server::Server;
+use crate::errors::RaftAPIError;
 use crate::raft::ClientWriteError;
 use crate::raft::RaftError;
 use crate::raft::Request;
 use crate::raft::Response;
 use crate::types::applied_state::AppliedState;
 use crate::types::log_entry::LogEntry;
+use crate::types::protobuf::ForwardRequest;
+use crate::types::protobuf::ForwardResponse;
 
 /// The container of APIs of the leader in a coredb service cluster.
 ///
@@ -22,6 +25,12 @@ pub struct RaftLeader<'a> {
 impl<'a> RaftLeader<'a> {
   pub fn new(server: &'a Server) -> RaftLeader<'a> {
     RaftLeader { server }
+  }
+
+  pub async fn handle(&self, req: ForwardRequest) -> Result<ForwardResponse, RaftAPIError> {
+    let resp = ForwardResponse { response: None };
+
+    Ok(resp)
   }
 
   /// Write a log through local raft node and return the states before and after applying the log.

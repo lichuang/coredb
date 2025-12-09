@@ -4,6 +4,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyerror::AnyError;
+use anyerror::func_name;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
@@ -29,6 +30,10 @@ use crate::server::connection::Connection;
 use crate::server::raft_forwarder::RaftForwarder;
 use crate::types::protobuf::ForwardRequest;
 use crate::types::protobuf::ForwardResponse;
+use crate::types::protobuf::RaftRequest;
+use crate::types::protobuf::Response;
+use crate::types::protobuf::SetRequest;
+use crate::types::protobuf::raft_request::Data;
 use crate::types::protobuf::raft_service_server::RaftServiceServer;
 use crate::util::DNSResolver;
 
@@ -169,6 +174,28 @@ impl Server {
       leader_id,
       leader_node: None,
     })
+  }
+
+  /// Submit a write request to the known leader. Returns the response after applying the request.
+  pub async fn write(&self, req: SetRequest) -> Result<Response> {
+    debug!("{} req: {:?}", func_name!(), req);
+
+    let raft_req = RaftRequest {
+      data: Some(Data::Set(req)),
+    };
+    let forward_req = ForwardRequest {
+      forward_to_leader: 1,
+      request: Some(raft_req),
+    };
+    // TODO: enable returning endpoint
+    let (_endpoint, res) = self.handle_forwardable_request(forward_req).await?;
+
+    match res.response {
+      Some(response) => Ok(Response {
+        value: Some(response.error),
+      }),
+      None => Ok(Response { value: None }),
+    }
   }
 
   pub async fn handle_forwardable_request(

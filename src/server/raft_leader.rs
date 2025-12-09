@@ -9,8 +9,6 @@ use crate::raft::ClientWriteError;
 use crate::raft::RaftError;
 use crate::raft::Request;
 use crate::raft::Response;
-use crate::types::applied_state::AppliedState;
-use crate::types::log_entry::LogEntry;
 use crate::types::protobuf::ForwardRequest;
 use crate::types::protobuf::ForwardResponse;
 

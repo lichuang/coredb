@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   tonic_build::configure()
     .btree_map(["."])
     .type_attribute("openraftpb.Node", "#[derive(Eq)]")
+    .type_attribute("openraftpb.KvMeta", "#[derive(Eq)]")
     .type_attribute("openraftpb.SetRequest", "#[derive(Eq)]")
     .type_attribute("openraftpb.Response", "#[derive(Eq)]")
     .type_attribute("openraftpb.LeaderId", "#[derive(Eq)]")

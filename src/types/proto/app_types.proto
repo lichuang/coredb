@@ -2,10 +2,16 @@ syntax = "proto3";
 
 package openraftpb;
 
+message KvMeta {
+  uint64 expire_at = 1; 
+  uint64 ttl = 2; 
+}
+
 // SetRequest represents a key-value pair to be stored
 message SetRequest {
   string key = 1;   // Key to store
-  string value = 2; // Value to associate with the key
+  bytes value = 2; // Value to associate with the key
+  KvMeta meta = 3;
 }
 
 // GetRequest represents a key lookup request

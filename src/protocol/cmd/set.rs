@@ -83,6 +83,7 @@ impl Set {
       self.key,
       String::from_utf8(self.value.to_vec()).unwrap()
     );
+    kv_api.put(&self.key, &self.value, None).await?;
     Ok(())
   }
 

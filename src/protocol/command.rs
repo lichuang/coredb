@@ -1,20 +1,22 @@
+use crate::protocol::get::GetCmd;
 use crate::protocol::resp::Value;
+use crate::protocol::set::SetCmd;
 use crate::store::Store;
 
 /// Redis command types
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// GET key
-    Get { key: String },
+    Get(GetCmd),
     /// SET key value
-    Set { key: String, value: Vec<u8> },
+    Set(SetCmd),
     /// Unknown or unsupported command
     Unknown(String),
 }
 
 impl Command {
     /// Parse a RESP array into a Command
-    pub fn from_resp(value: Value) -> Option<Self> {
+    fn from_resp(value: Value) -> Option<Self> {
         match value {
             Value::Array(Some(items)) if !items.is_empty() => {
                 // First item should be the command name
@@ -27,8 +29,8 @@ impl Command {
                 };
 
                 match cmd_name.as_str() {
-                    "GET" => Self::parse_get(&items),
-                    "SET" => Self::parse_set(&items),
+                    "GET" => GetCmd::parse(&items),
+                    "SET" => SetCmd::parse(&items),
                     _ => Some(Command::Unknown(format!("unknown command '{}'", cmd_name))),
                 }
             }
@@ -36,69 +38,20 @@ impl Command {
         }
     }
 
-    fn parse_get(items: &[Value]) -> Option<Self> {
-        if items.len() != 2 {
-            return Some(Command::Unknown(
-                "ERR wrong number of arguments for 'get' command".to_string(),
-            ));
-        }
-
-        let key = match &items[1] {
-            Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
-            Value::SimpleString(s) => s.clone(),
-            _ => {
-                return Some(Command::Unknown(
-                    "ERR invalid key argument".to_string(),
-                ))
-            }
-        };
-
-        Some(Command::Get { key })
-    }
-
-    fn parse_set(items: &[Value]) -> Option<Self> {
-        if items.len() != 3 {
-            return Some(Command::Unknown(
-                "ERR wrong number of arguments for 'set' command".to_string(),
-            ));
-        }
-
-        let key = match &items[1] {
-            Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
-            Value::SimpleString(s) => s.clone(),
-            _ => {
-                return Some(Command::Unknown(
-                    "ERR invalid key argument".to_string(),
-                ))
-            }
-        };
-
-        let value = match &items[2] {
-            Value::BulkString(Some(data)) => data.clone(),
-            Value::SimpleString(s) => s.as_bytes().to_vec(),
-            _ => {
-                return Some(Command::Unknown(
-                    "ERR invalid value argument".to_string(),
-                ))
-            }
-        };
-
-        Some(Command::Set { key, value })
-    }
-
     /// Execute the command on the given store and return the response
-    pub fn execute(&self, store: &Store) -> Value {
+    fn execute_internal(&self, store: &Store) -> Value {
         match self {
-            Command::Get { key } => match store.get(key) {
-                Ok(Some(value)) => Value::BulkString(Some(value)),
-                Ok(None) => Value::BulkString(None), // Null bulk string for key not found
-                Err(e) => Value::error(format!("ERR {}", e)),
-            },
-            Command::Set { key, value } => match store.set(key.clone(), value.clone()) {
-                Ok(_) => Value::ok(),
-                Err(e) => Value::error(format!("ERR {}", e)),
-            },
+            Command::Get(cmd) => cmd.execute(store),
+            Command::Set(cmd) => cmd.execute(store),
             Command::Unknown(msg) => Value::error(msg.clone()),
+        }
+    }
+
+    /// Parse and execute a RESP command on the given store
+    pub fn execute(value: Value, store: &Store) -> Value {
+        match Self::from_resp(value) {
+            Some(cmd) => cmd.execute_internal(store),
+            None => Value::error("ERR failed to parse command"),
         }
     }
 }
@@ -106,6 +59,23 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
+
+    #[test]
+    fn test_parse_get_command() {
+        let resp = Value::Array(Some(vec![
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+        ]));
+
+        let cmd = Command::from_resp(resp).unwrap();
+        match cmd {
+            Command::Get(get_cmd) => {
+                assert_eq!(get_cmd.key, "mykey");
+            }
+            _ => panic!("Expected GET command"),
+        }
+    }
 
     #[test]
     fn test_parse_set_command() {
@@ -117,26 +87,69 @@ mod tests {
 
         let cmd = Command::from_resp(resp).unwrap();
         match cmd {
-            Command::Set { key, value } => {
-                assert_eq!(key, "mykey");
-                assert_eq!(value, b"myvalue");
+            Command::Set(set_cmd) => {
+                assert_eq!(set_cmd.key, "mykey");
+                assert_eq!(set_cmd.value, b"myvalue");
             }
             _ => panic!("Expected SET command"),
         }
     }
 
     #[test]
-    fn test_execute_set() {
+    fn test_execute_get_not_found() {
         let store = Store::new();
         let resp = Value::Array(Some(vec![
-            Value::BulkString(Some(b"SET".to_vec())),
-            Value::BulkString(Some(b"key".to_vec())),
-            Value::BulkString(Some(b"value".to_vec())),
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"nonexistent".to_vec())),
         ]));
 
-        let cmd = Command::from_resp(resp).unwrap();
-        let result = cmd.execute(&store);
+        let result = Command::execute(resp, &store);
         
-        assert_eq!(result, Value::ok());
+        assert_eq!(result, Value::BulkString(None));
+    }
+
+    #[test]
+    fn test_execute_set_and_get() {
+        let store = Store::new();
+        
+        // SET
+        let set_resp = Value::Array(Some(vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+        ]));
+        let set_result = Command::execute(set_resp, &store);
+        assert_eq!(set_result, Value::ok());
+        
+        // GET
+        let get_resp = Value::Array(Some(vec![
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+        ]));
+        let get_result = Command::execute(get_resp, &store);
+        assert_eq!(get_result, Value::BulkString(Some(b"myvalue".to_vec())));
+    }
+
+    #[test]
+    fn test_execute_invalid_command() {
+        let store = Store::new();
+        let resp = Value::Array(Some(vec![
+            Value::BulkString(Some(b"UNKNOWN".to_vec())),
+        ]));
+
+        let result = Command::execute(resp, &store);
+        
+        assert_eq!(result, Value::error("unknown command 'UNKNOWN'"));
+    }
+
+    #[test]
+    fn test_execute_parse_error() {
+        let store = Store::new();
+        // Invalid RESP (not an array)
+        let resp = Value::SimpleString("not a command".to_string());
+
+        let result = Command::execute(resp, &store);
+        
+        assert_eq!(result, Value::error("ERR failed to parse command"));
     }
 }

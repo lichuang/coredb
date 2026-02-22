@@ -1,4 +1,4 @@
-use crate::resp::Value;
+use crate::protocol::resp::Value;
 use crate::store::Store;
 
 /// Redis command types

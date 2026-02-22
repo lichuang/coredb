@@ -1,5 +1,4 @@
-mod command;
-mod resp;
+mod protocol;
 mod server;
 mod store;
 

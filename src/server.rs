@@ -4,8 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, warn};
 
-use crate::command::Command;
-use crate::resp::{Parser, Value};
+use crate::protocol::{Command, Parser, Value};
 use crate::store::Store;
 
 /// Default listening port (Redis default port)

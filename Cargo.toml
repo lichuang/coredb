@@ -1,14 +1,34 @@
 [package]
 name = "coredb"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+authors = ["lichuang"]
+description = "A Redis-compatible distributed KV database with strong consistency, built on Raft consensus and RocksDB."
+documentation = "https://github.com/lichuang/coredb"
+readme = "README.md"
+homepage = "https://github.com/lichuang/coredb"
+repository = "https://github.com/lichuang/coredb"
+license = "Apache-2.0"
+keywords = ["database", "kv-store", "redis", "raft", "distributed-systems", "consistency"]
+
+[[bin]]
+name = "coredb"
+path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.36", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[dev-dependencies]
+# Testing dependencies will be added here
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

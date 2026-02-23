@@ -4,7 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, warn};
 
-use crate::protocol::{Command, Parser, Value};
+use crate::protocol::{CommandFactory, Parser, Value};
 use crate::store::Store;
 
 /// Default listening port (Redis default port)
@@ -13,13 +13,22 @@ const DEFAULT_PORT: u16 = 6379;
 /// TCP server handle for processing connections
 #[derive(Clone)]
 pub struct ServerHandle {
+    cmd_factory: Arc<CommandFactory>,
     store: Arc<Store>,
 }
 
 impl ServerHandle {
+    /// Create a new server handle with command factory
+    pub fn new(cmd_factory: Arc<CommandFactory>, store: Arc<Store>) -> Self {
+        Self {
+            cmd_factory,
+            store,
+        }
+    }
+
     /// Process a RESP command and return the response
-    fn process_command(&self, value: Value) -> Value {
-        Command::execute(value, &self.store)
+    async fn process_command(&self, value: Value) -> Value {
+        self.cmd_factory.execute(value, &self.store).await
     }
 
     /// Handle a single client connection
@@ -52,7 +61,7 @@ impl ServerHandle {
                                 info!("Received command from {}: {:?}", peer_addr, value);
 
                                 // Process the command and get response
-                                let response = self.process_command(value);
+                                let response = self.process_command(value).await;
                                 let encoded = response.encode();
 
                                 // Send response
@@ -98,12 +107,23 @@ impl Server {
         let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
         info!("TCP server bound to {}", local_addr);
+
+        // Initialize command factory and register commands
+        let mut cmd_factory = CommandFactory::new();
+        
+        // Register GET and SET commands
+        use crate::protocol::get::GetCmd;
+        use crate::protocol::set::SetCmd;
+        cmd_factory.register("GET", GetCmd);
+        cmd_factory.register("SET", SetCmd);
+
         Ok(Self {
             listener,
             local_addr,
-            handle: ServerHandle {
-                store: Arc::new(Store::new()),
-            },
+            handle: ServerHandle::new(
+                Arc::new(cmd_factory),
+                Arc::new(Store::new()),
+            ),
         })
     }
 
@@ -118,7 +138,7 @@ impl Server {
     }
 
     /// Start server, accept and process connections
-    pub async fn run(self) {
+    pub async fn run(&self) {
         info!("Server started, listening on {}", self.local_addr);
 
         loop {

@@ -8,5 +8,5 @@ pub mod get;
 pub mod resp;
 pub mod set;
 
-pub use command::Command;
+pub use command::CommandFactory;
 pub use resp::{Parser, Value};

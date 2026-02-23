@@ -1,57 +1,50 @@
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::store::Store;
+use async_trait::async_trait;
 
-/// SET command: SET key value
+/// Parameters for SET command
 #[derive(Debug, Clone, PartialEq)]
-pub struct SetCmd {
+pub struct SetParams {
     pub key: String,
     pub value: Vec<u8>,
 }
 
-impl SetCmd {
-    /// Create a new SET command
-    pub fn new(key: impl Into<String>, value: impl Into<Vec<u8>>) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-        }
-    }
-
-    /// Parse SET command from RESP array items
-    pub fn parse(items: &[Value]) -> Option<Command> {
+impl SetParams {
+    /// Parse SET command parameters from RESP array items
+    fn parse(items: &[Value]) -> Option<Self> {
         if items.len() != 3 {
-            return Some(Command::Unknown(
-                "ERR wrong number of arguments for 'set' command".to_string(),
-            ));
+            return None;
         }
 
         let key = match &items[1] {
             Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
             Value::SimpleString(s) => s.clone(),
-            _ => {
-                return Some(Command::Unknown(
-                    "ERR invalid key argument".to_string(),
-                ))
-            }
+            _ => return None,
         };
 
         let value = match &items[2] {
             Value::BulkString(Some(data)) => data.clone(),
             Value::SimpleString(s) => s.as_bytes().to_vec(),
-            _ => {
-                return Some(Command::Unknown(
-                    "ERR invalid value argument".to_string(),
-                ))
-            }
+            _ => return None,
         };
 
-        Some(Command::Set(SetCmd::new(key, value)))
+        Some(SetParams { key, value })
     }
+}
 
-    /// Execute the SET command
-    pub fn execute(&self, store: &Store) -> Value {
-        match store.set(self.key.clone(), self.value.clone()) {
+/// SET command executor
+pub struct SetCmd;
+
+#[async_trait]
+impl Command for SetCmd {
+    async fn execute(&self, items: &[Value], store: &Store) -> Value {
+        let params = match SetParams::parse(items) {
+            Some(params) => params,
+            None => return Value::error("ERR wrong number of arguments for 'set' command"),
+        };
+
+        match store.set(params.key, params.value) {
             Ok(_) => Value::ok(),
             Err(e) => Value::error(format!("ERR {}", e)),
         }
@@ -64,21 +57,54 @@ mod tests {
     use crate::store::Store;
 
     #[test]
-    fn test_set_cmd_struct_creation() {
-        let cmd = SetCmd::new("mykey", "myvalue");
-        assert_eq!(cmd.key, "mykey");
-        assert_eq!(cmd.value, b"myvalue");
+    fn test_set_params_parse_success() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.key, "mykey");
+        assert_eq!(params.value, b"myvalue");
     }
 
     #[test]
-    fn test_set_cmd_execute() {
+    fn test_set_params_parse_wrong_args() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"key".to_vec())),
+        ];
+        assert!(SetParams::parse(&items).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_set_cmd_execute_success() {
         let store = Store::new();
-        let set_cmd = SetCmd::new("key", b"value");
-        let result = set_cmd.execute(&store);
-        
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"key".to_vec())),
+            Value::BulkString(Some(b"value".to_vec())),
+        ];
+        let cmd = SetCmd;
+        let result = cmd.execute(&items, &store).await;
+
         assert_eq!(result, Value::ok());
-        
-        // Verify the value was set
         assert_eq!(store.get("key").unwrap(), Some(b"value".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn test_set_cmd_execute_wrong_args() {
+        let store = Store::new();
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"key".to_vec())),
+        ];
+        let cmd = SetCmd;
+        let result = cmd.execute(&items, &store).await;
+
+        assert_eq!(
+            result,
+            Value::error("ERR wrong number of arguments for 'set' command")
+        );
     }
 }

@@ -2,6 +2,7 @@ mod protocol;
 mod server;
 mod store;
 
+use std::sync::Arc;
 use server::Server;
 use tracing::info;
 
@@ -21,7 +22,7 @@ async fn main() -> std::io::Result<()> {
     info!("Version: 0.1.0");
 
     // Create and start TCP server
-    let server = Server::bind_default().await?;
+    let server = Arc::new(Server::bind_default().await?);
     info!("Server listening on: {}", server.local_addr());
 
     // Start server (blocking)

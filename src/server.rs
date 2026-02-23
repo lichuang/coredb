@@ -10,30 +10,61 @@ use crate::store::Store;
 /// Default listening port (Redis default port)
 const DEFAULT_PORT: u16 = 6379;
 
-/// TCP server handle for processing connections
-#[derive(Clone)]
-pub struct ServerHandle {
+/// TCP server
+pub struct Server {
+    listener: TcpListener,
+    local_addr: SocketAddr,
     cmd_factory: Arc<CommandFactory>,
     store: Arc<Store>,
 }
 
-impl ServerHandle {
-    /// Create a new server handle with command factory
-    pub fn new(cmd_factory: Arc<CommandFactory>, store: Arc<Store>) -> Self {
-        Self {
+impl Server {
+    /// Create and bind TCP server to specified address
+    pub async fn bind(addr: &str) -> std::io::Result<Self> {
+        let listener = TcpListener::bind(addr).await?;
+        let local_addr = listener.local_addr()?;
+        info!("TCP server bound to {}", local_addr);
+
+        // Initialize command factory
+        let cmd_factory = Arc::new(CommandFactory::init());
+        let store = Arc::new(Store::new());
+
+        Ok(Self {
+            listener,
+            local_addr,
             cmd_factory,
             store,
-        }
+        })
+    }
+
+    /// Create server using default port
+    pub async fn bind_default() -> std::io::Result<Self> {
+        Self::bind(&format!("0.0.0.0:{}", DEFAULT_PORT)).await
+    }
+
+    /// Get local listening address
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    /// Get a value from the store
+    pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
+        self.store.get(key)
+    }
+
+    /// Set a value in the store
+    pub async fn set(&self, key: String, value: Vec<u8>) -> Result<(), String> {
+        self.store.set(key, value)
     }
 
     /// Process a RESP command and return the response
     async fn process_command(&self, value: Value) -> Value {
-        self.cmd_factory.execute(value, &self.store).await
+        self.cmd_factory.execute(value, self).await
     }
 
     /// Handle a single client connection
     async fn handle_connection(
-        &self,
+        self: Arc<Self>,
         mut stream: TcpStream,
         peer_addr: SocketAddr,
     ) -> std::io::Result<()> {
@@ -92,53 +123,9 @@ impl ServerHandle {
         info!("Connection handler ended for {}", peer_addr);
         Ok(())
     }
-}
-
-/// TCP server
-pub struct Server {
-    listener: TcpListener,
-    local_addr: SocketAddr,
-    handle: ServerHandle,
-}
-
-impl Server {
-    /// Create and bind TCP server to specified address
-    pub async fn bind(addr: &str) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
-        let local_addr = listener.local_addr()?;
-        info!("TCP server bound to {}", local_addr);
-
-        // Initialize command factory and register commands
-        let mut cmd_factory = CommandFactory::new();
-        
-        // Register GET and SET commands
-        use crate::protocol::get::GetCmd;
-        use crate::protocol::set::SetCmd;
-        cmd_factory.register("GET", GetCmd);
-        cmd_factory.register("SET", SetCmd);
-
-        Ok(Self {
-            listener,
-            local_addr,
-            handle: ServerHandle::new(
-                Arc::new(cmd_factory),
-                Arc::new(Store::new()),
-            ),
-        })
-    }
-
-    /// Create server using default port
-    pub async fn bind_default() -> std::io::Result<Self> {
-        Self::bind(&format!("0.0.0.0:{}", DEFAULT_PORT)).await
-    }
-
-    /// Get local listening address
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local_addr
-    }
 
     /// Start server, accept and process connections
-    pub async fn run(&self) {
+    pub async fn run(self: Arc<Self>) {
         info!("Server started, listening on {}", self.local_addr);
 
         loop {
@@ -146,12 +133,12 @@ impl Server {
                 Ok((stream, peer_addr)) => {
                     info!("New connection accepted from {}", peer_addr);
 
-                    // Clone the handle for the new connection
-                    let handle = self.handle.clone();
+                    // Clone the Arc<Server> for the new connection
+                    let server = Arc::clone(&self);
 
                     // Spawn an independent task for each connection
                     tokio::spawn(async move {
-                        if let Err(e) = handle.handle_connection(stream, peer_addr).await {
+                        if let Err(e) = server.handle_connection(stream, peer_addr).await {
                             error!("Error handling connection from {}: {}", peer_addr, e);
                         }
                     });

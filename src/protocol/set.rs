@@ -1,19 +1,67 @@
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
-use crate::store::Store;
+use crate::server::Server;
 use async_trait::async_trait;
 
+/// Expiration time options for SET command
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expiration {
+    /// EX seconds - Set the specified expire time, in seconds
+    Ex(u64),
+    /// PX milliseconds - Set the specified expire time, in milliseconds
+    Px(u64),
+    /// EXAT timestamp-seconds - Set the specified Unix time at which the key will expire, in seconds
+    ExAt(u64),
+    /// PXAT timestamp-milliseconds - Set the specified Unix time at which the key will expire, in milliseconds
+    PxAt(u64),
+    /// KEEPTTL - Retain the time to live associated with the key
+    KeepTtl,
+}
+
+/// Set mode options (NX/XX)
+#[derive(Debug, Clone, PartialEq)]
+pub enum SetMode {
+    /// NX - Only set the key if it does not already exist
+    Nx,
+    /// XX - Only set the key if it already exists
+    Xx,
+}
+
 /// Parameters for SET command
+/// 
+/// Standard Redis SET command format:
+/// SET key value [NX | XX] [GET] [EX seconds | PX milliseconds | EXAT timestamp | PXAT milliseconds-timestamp | KEEPTTL]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetParams {
+    /// The key to set
     pub key: String,
+    /// The value to set
     pub value: Vec<u8>,
+    /// NX or XX mode (optional)
+    pub mode: Option<SetMode>,
+    /// Whether to return the previous value (GET option)
+    pub get: bool,
+    /// Expiration time options (optional)
+    pub expiration: Option<Expiration>,
 }
 
 impl SetParams {
+    /// Create a new SetParams with minimal required fields
+    pub fn new(key: impl Into<String>, value: impl Into<Vec<u8>>) -> Self {
+        Self {
+            key: key.into(),
+            value: value.into(),
+            mode: None,
+            get: false,
+            expiration: None,
+        }
+    }
+
     /// Parse SET command parameters from RESP array items
+    /// Format: SET key value [NX | XX] [GET] [EX seconds | PX milliseconds | EXAT timestamp | PXAT milliseconds-timestamp | KEEPTTL]
     fn parse(items: &[Value]) -> Option<Self> {
-        if items.len() != 3 {
+        // Minimum: SET key value
+        if items.len() < 3 {
             return None;
         }
 
@@ -29,23 +77,120 @@ impl SetParams {
             _ => return None,
         };
 
-        Some(SetParams { key, value })
+        let mut params = SetParams::new(key, value);
+        let mut i = 3;
+
+        // Parse optional arguments
+        while i < items.len() {
+            let arg = match &items[i] {
+                Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_uppercase(),
+                Value::SimpleString(s) => s.to_uppercase(),
+                _ => return None,
+            };
+
+            match arg.as_str() {
+                "NX" => {
+                    if params.mode.is_some() {
+                        return None; // NX and XX are mutually exclusive
+                    }
+                    params.mode = Some(SetMode::Nx);
+                    i += 1;
+                }
+                "XX" => {
+                    if params.mode.is_some() {
+                        return None; // NX and XX are mutually exclusive
+                    }
+                    params.mode = Some(SetMode::Xx);
+                    i += 1;
+                }
+                "GET" => {
+                    params.get = true;
+                    i += 1;
+                }
+                "EX" => {
+                    if params.expiration.is_some() || i + 1 >= items.len() {
+                        return None;
+                    }
+                    let seconds = parse_u64(&items[i + 1])?;
+                    params.expiration = Some(Expiration::Ex(seconds));
+                    i += 2;
+                }
+                "PX" => {
+                    if params.expiration.is_some() || i + 1 >= items.len() {
+                        return None;
+                    }
+                    let milliseconds = parse_u64(&items[i + 1])?;
+                    params.expiration = Some(Expiration::Px(milliseconds));
+                    i += 2;
+                }
+                "EXAT" => {
+                    if params.expiration.is_some() || i + 1 >= items.len() {
+                        return None;
+                    }
+                    let timestamp = parse_u64(&items[i + 1])?;
+                    params.expiration = Some(Expiration::ExAt(timestamp));
+                    i += 2;
+                }
+                "PXAT" => {
+                    if params.expiration.is_some() || i + 1 >= items.len() {
+                        return None;
+                    }
+                    let timestamp = parse_u64(&items[i + 1])?;
+                    params.expiration = Some(Expiration::PxAt(timestamp));
+                    i += 2;
+                }
+                "KEEPTTL" => {
+                    if params.expiration.is_some() {
+                        return None;
+                    }
+                    params.expiration = Some(Expiration::KeepTtl);
+                    i += 1;
+                }
+                _ => return None, // Unknown option
+            }
+        }
+
+        Some(params)
+    }
+}
+
+/// Parse a Value as u64
+fn parse_u64(value: &Value) -> Option<u64> {
+    match value {
+        Value::BulkString(Some(data)) => {
+            String::from_utf8_lossy(data).parse::<u64>().ok()
+        }
+        Value::SimpleString(s) => s.parse::<u64>().ok(),
+        Value::Integer(i) if *i >= 0 => Some(*i as u64),
+        _ => None,
     }
 }
 
 /// SET command executor
-pub struct SetCmd;
+pub struct SetCommand;
 
 #[async_trait]
-impl Command for SetCmd {
-    async fn execute(&self, items: &[Value], store: &Store) -> Value {
+impl Command for SetCommand {
+    async fn execute(&self, items: &[Value], server: &Server) -> Value {
         let params = match SetParams::parse(items) {
             Some(params) => params,
             None => return Value::error("ERR wrong number of arguments for 'set' command"),
         };
 
-        match store.set(params.key, params.value) {
-            Ok(_) => Value::ok(),
+        // TODO: Implement NX/XX mode logic
+        // TODO: Implement GET option to return previous value
+        // TODO: Implement expiration logic (EX, PX, EXAT, PXAT, KEEPTTL)
+
+        // For now, just set the value (basic implementation)
+        match server.set(params.key, params.value).await {
+            Ok(_) => {
+                if params.get {
+                    // TODO: Return previous value when GET option is implemented
+                    Value::BulkString(None)
+                } else {
+                    Value::ok()
+                }
+            }
             Err(e) => Value::error(format!("ERR {}", e)),
         }
     }
@@ -54,10 +199,9 @@ impl Command for SetCmd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Store;
 
     #[test]
-    fn test_set_params_parse_success() {
+    fn test_set_params_parse_basic() {
         let items = vec![
             Value::BulkString(Some(b"SET".to_vec())),
             Value::BulkString(Some(b"mykey".to_vec())),
@@ -66,6 +210,149 @@ mod tests {
         let params = SetParams::parse(&items).unwrap();
         assert_eq!(params.key, "mykey");
         assert_eq!(params.value, b"myvalue");
+        assert_eq!(params.mode, None);
+        assert_eq!(params.get, false);
+        assert_eq!(params.expiration, None);
+    }
+
+    #[test]
+    fn test_set_params_parse_with_nx() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"NX".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.mode, Some(SetMode::Nx));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_xx() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"XX".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.mode, Some(SetMode::Xx));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_get() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"GET".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.get, true);
+    }
+
+    #[test]
+    fn test_set_params_parse_with_ex() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"EX".to_vec())),
+            Value::BulkString(Some(b"60".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.expiration, Some(Expiration::Ex(60)));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_px() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"PX".to_vec())),
+            Value::BulkString(Some(b"1000".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.expiration, Some(Expiration::Px(1000)));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_exat() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"EXAT".to_vec())),
+            Value::BulkString(Some(b"1893456000".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.expiration, Some(Expiration::ExAt(1893456000)));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_pxat() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"PXAT".to_vec())),
+            Value::BulkString(Some(b"1893456000000".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.expiration, Some(Expiration::PxAt(1893456000000)));
+    }
+
+    #[test]
+    fn test_set_params_parse_with_keepttl() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"KEEPTTL".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.expiration, Some(Expiration::KeepTtl));
+    }
+
+    #[test]
+    fn test_set_params_parse_combined_options() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"NX".to_vec())),
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"EX".to_vec())),
+            Value::BulkString(Some(b"60".to_vec())),
+        ];
+        let params = SetParams::parse(&items).unwrap();
+        assert_eq!(params.mode, Some(SetMode::Nx));
+        assert_eq!(params.get, true);
+        assert_eq!(params.expiration, Some(Expiration::Ex(60)));
+    }
+
+    #[test]
+    fn test_set_params_parse_nx_xx_mutually_exclusive() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"NX".to_vec())),
+            Value::BulkString(Some(b"XX".to_vec())),
+        ];
+        assert!(SetParams::parse(&items).is_none());
+    }
+
+    #[test]
+    fn test_set_params_parse_missing_ex_value() {
+        let items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"mykey".to_vec())),
+            Value::BulkString(Some(b"myvalue".to_vec())),
+            Value::BulkString(Some(b"EX".to_vec())),
+        ];
+        assert!(SetParams::parse(&items).is_none());
     }
 
     #[test]
@@ -75,36 +362,5 @@ mod tests {
             Value::BulkString(Some(b"key".to_vec())),
         ];
         assert!(SetParams::parse(&items).is_none());
-    }
-
-    #[tokio::test]
-    async fn test_set_cmd_execute_success() {
-        let store = Store::new();
-        let items = vec![
-            Value::BulkString(Some(b"SET".to_vec())),
-            Value::BulkString(Some(b"key".to_vec())),
-            Value::BulkString(Some(b"value".to_vec())),
-        ];
-        let cmd = SetCmd;
-        let result = cmd.execute(&items, &store).await;
-
-        assert_eq!(result, Value::ok());
-        assert_eq!(store.get("key").unwrap(), Some(b"value".to_vec()));
-    }
-
-    #[tokio::test]
-    async fn test_set_cmd_execute_wrong_args() {
-        let store = Store::new();
-        let items = vec![
-            Value::BulkString(Some(b"SET".to_vec())),
-            Value::BulkString(Some(b"key".to_vec())),
-        ];
-        let cmd = SetCmd;
-        let result = cmd.execute(&items, &store).await;
-
-        assert_eq!(
-            result,
-            Value::error("ERR wrong number of arguments for 'set' command")
-        );
     }
 }

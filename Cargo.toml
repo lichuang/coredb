@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
+rkyv = { version = "0.8", features = ["alloc"] }
 tokio = { version = "1.36", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

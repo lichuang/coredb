@@ -1,6 +1,8 @@
+use crate::encoding::StringValue;
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
+use crate::util::now_ms;
 use async_trait::async_trait;
 
 /// Parameters for GET command
@@ -26,6 +28,33 @@ impl GetParams {
     }
 }
 
+/// Get a value from the server, checking for expiration.
+/// Returns (value, expired) where `expired` is true if the key was expired and deleted.
+async fn get_value_check_expiry(
+    server: &Server,
+    key: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let raw_value = match server.get(key).await? {
+        Some(v) => v,
+        None => return Ok(None),
+    };
+
+    // Deserialize and check expiration
+    let string_value = match StringValue::deserialize(&raw_value) {
+        Ok(v) => v,
+        Err(_) => return Err("corrupted value".to_string()),
+    };
+
+    // Check if expired
+    if string_value.is_expired(now_ms()) {
+        // Lazily delete the expired key
+        let _ = server.delete(key).await;
+        return Ok(None);
+    }
+
+    Ok(Some(string_value.data))
+}
+
 /// GET command executor
 pub struct GetCommand;
 
@@ -37,9 +66,9 @@ impl Command for GetCommand {
             None => return Value::error("ERR wrong number of arguments for 'get' command"),
         };
 
-        match server.get(&params.key).await {
-            Ok(Some(value)) => Value::BulkString(Some(value)),
-            Ok(None) => Value::BulkString(None), // Null bulk string for key not found
+        match get_value_check_expiry(server, &params.key).await {
+            Ok(Some(data)) => Value::BulkString(Some(data)),
+            Ok(None) => Value::BulkString(None), // Key not found or expired
             Err(e) => Value::error(format!("ERR {}", e)),
         }
     }

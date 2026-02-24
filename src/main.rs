@@ -1,6 +1,8 @@
+mod encoding;
 mod protocol;
 mod server;
 mod store;
+mod util;
 
 use std::sync::Arc;
 use server::Server;

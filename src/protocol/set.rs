@@ -1,6 +1,8 @@
+use crate::encoding::StringValue;
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
+use crate::util::now_ms;
 use async_trait::async_trait;
 
 /// Expiration time options for SET command
@@ -177,12 +179,31 @@ impl Command for SetCommand {
             None => return Value::error("ERR wrong number of arguments for 'set' command"),
         };
 
+        // Calculate expiration timestamp in milliseconds
+        let expires_at = params.expiration.and_then(|exp| {
+            let now = now_ms();
+            match exp {
+                Expiration::Ex(seconds) => Some(now + seconds * 1000),
+                Expiration::Px(millis) => Some(now + millis),
+                Expiration::ExAt(timestamp) => Some(timestamp * 1000),
+                Expiration::PxAt(timestamp) => Some(timestamp),
+                Expiration::KeepTtl => None, // TODO: Implement KEEPTTL
+            }
+        });
+
+        // Create StringValue and serialize
+        let string_value = match expires_at {
+            Some(exp) => StringValue::with_expiration(params.value, exp),
+            None => StringValue::new(params.value),
+        };
+        let serialized = string_value.serialize();
+
         // TODO: Implement NX/XX mode logic
         // TODO: Implement GET option to return previous value
-        // TODO: Implement expiration logic (EX, PX, EXAT, PXAT, KEEPTTL)
+        // TODO: Implement KEEPTTL for expiration
 
         // For now, just set the value (basic implementation)
-        match server.set(params.key, params.value).await {
+        match server.set(params.key, serialized).await {
             Ok(_) => {
                 if params.get {
                     // TODO: Return previous value when GET option is implemented
@@ -199,6 +220,83 @@ impl Command for SetCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::Server;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_set_and_get_with_expiration() {
+        let server = Arc::new(Server::bind("127.0.0.1:0").await.unwrap());
+        
+        // Set key with 1 second expiration
+        let set_items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"test_key".to_vec())),
+            Value::BulkString(Some(b"test_value".to_vec())),
+            Value::BulkString(Some(b"PX".to_vec())),
+            Value::BulkString(Some(b"100".to_vec())), // 100ms expiration
+        ];
+        
+        let set_cmd = SetCommand;
+        let result = set_cmd.execute(&set_items, &server).await;
+        assert_eq!(result, Value::ok());
+        
+        // Get should return the value immediately
+        let get_items = vec![
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"test_key".to_vec())),
+        ];
+        
+        let get_cmd = crate::protocol::get::GetCommand;
+        let result = get_cmd.execute(&get_items, &server).await;
+        assert_eq!(result, Value::BulkString(Some(b"test_value".to_vec())));
+        
+        // Wait for expiration
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+        
+        // Get should return null after expiration
+        let result = get_cmd.execute(&get_items, &server).await;
+        assert_eq!(result, Value::BulkString(None));
+    }
+
+    #[tokio::test]
+    async fn test_set_without_expiration() {
+        let server = Arc::new(Server::bind("127.0.0.1:0").await.unwrap());
+        
+        // Set key without expiration
+        let set_items = vec![
+            Value::BulkString(Some(b"SET".to_vec())),
+            Value::BulkString(Some(b"persistent_key".to_vec())),
+            Value::BulkString(Some(b"persistent_value".to_vec())),
+        ];
+        
+        let set_cmd = SetCommand;
+        let result = set_cmd.execute(&set_items, &server).await;
+        assert_eq!(result, Value::ok());
+        
+        // Get should return the value
+        let get_items = vec![
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"persistent_key".to_vec())),
+        ];
+        
+        let get_cmd = crate::protocol::get::GetCommand;
+        let result = get_cmd.execute(&get_items, &server).await;
+        assert_eq!(result, Value::BulkString(Some(b"persistent_value".to_vec())));
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_key() {
+        let server = Arc::new(Server::bind("127.0.0.1:0").await.unwrap());
+        
+        let get_items = vec![
+            Value::BulkString(Some(b"GET".to_vec())),
+            Value::BulkString(Some(b"nonexistent_key".to_vec())),
+        ];
+        
+        let get_cmd = crate::protocol::get::GetCommand;
+        let result = get_cmd.execute(&get_items, &server).await;
+        assert_eq!(result, Value::BulkString(None));
+    }
 
     #[test]
     fn test_set_params_parse_basic() {

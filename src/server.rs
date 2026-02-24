@@ -57,6 +57,11 @@ impl Server {
         self.store.set(key, value)
     }
 
+    /// Delete a key from the store
+    pub async fn delete(&self, key: &str) -> Result<bool, String> {
+        self.store.delete(key)
+    }
+
     /// Process a RESP command and return the response
     async fn process_command(&self, value: Value) -> Value {
         self.cmd_factory.execute(value, self).await

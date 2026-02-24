@@ -26,6 +26,12 @@ impl Store {
         let data = self.data.read().map_err(|_| "Lock poisoned")?;
         Ok(data.get(key).cloned())
     }
+
+    /// Delete a key from the store
+    pub fn delete(&self, key: &str) -> Result<bool, String> {
+        let mut data = self.data.write().map_err(|_| "Lock poisoned")?;
+        Ok(data.remove(key).is_some())
+    }
 }
 
 impl Default for Store {

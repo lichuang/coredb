@@ -1,9 +1,9 @@
 //! String type encoding/decoding for storage
 
-use rkyv::{Archive, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 /// String value structure for storage
-#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StringValue {
     /// Format version
     pub version: u8,
@@ -32,20 +32,14 @@ impl StringValue {
         }
     }
 
-    /// Serialize to bytes using rkyv
+    /// Serialize to bytes using postcard
     pub fn serialize(&self) -> Vec<u8> {
-        rkyv::to_bytes::<rkyv::rancor::Error>(self)
-            .expect("serialization should succeed")
-            .into()
+        postcard::to_allocvec(self).expect("serialization should succeed")
     }
 
-    /// Deserialize from bytes using rkyv
+    /// Deserialize from bytes using postcard
     pub fn deserialize(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let archived = rkyv::access::<ArchivedStringValue, rkyv::rancor::Error>(bytes)
-            .map_err(|_| DecodeError::InvalidData)?;
-        
-        rkyv::api::deserialize_using::<StringValue, _, rkyv::rancor::Error>(archived, &mut ())
-            .map_err(|_| DecodeError::InvalidData)
+        postcard::from_bytes(bytes).map_err(|_| DecodeError::InvalidData)
     }
 
     /// Check if this value has expired (given current timestamp in milliseconds)

@@ -1,0 +1,18 @@
+# CoreDB Node 3 Configuration
+# Cluster mode - joins to node1
+
+node_id = 3
+server_addr = "0.0.0.0:6381"
+
+[raft]
+address = "127.0.0.1:7003"
+advertise_host = "localhost"
+single = false
+join = ["localhost:7001"]
+
+[rocksdb]
+data_path = "/tmp/coredb/node3"
+max_open_files = 10000
+
+[log]
+level = "info"

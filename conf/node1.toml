@@ -1,0 +1,18 @@
+# CoreDB Node 1 Configuration
+# Single node mode for testing
+
+node_id = 1
+server_addr = "0.0.0.0:6379"
+
+[raft]
+address = "127.0.0.1:7001"
+advertise_host = "localhost"
+single = true
+join = []
+
+[rocksdb]
+data_path = "/tmp/coredb/node1"
+max_open_files = 10000
+
+[log]
+level = "info"

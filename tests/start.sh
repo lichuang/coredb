@@ -190,6 +190,9 @@ stop() {
         fi
     done
     
+    # Also kill any remaining coredb processes
+    pkill -9 coredb 2>/dev/null || true
+    
     echo -e "${GREEN}CoreDB cluster stopped${NC}"
 }
 

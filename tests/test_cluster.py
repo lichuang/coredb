@@ -6,7 +6,8 @@ This test suite:
 1. Starts a 3-node CoreDB cluster
 2. Performs basic SET/GET operations
 3. Verifies data replication across nodes
-4. Stops the cluster
+4. Tests persistence after restart
+5. Stops the cluster
 
 Usage:
     pip install -r requirements.txt
@@ -66,7 +67,7 @@ class ClusterManager:
         return True
     
     def stop(self) -> None:
-        """Stop the cluster."""
+        """Stop the cluster (without cleaning data)."""
         print("Stopping CoreDB cluster...")
         self._run_command(["./start.sh", "stop"], check=False)
         print("Cluster stopped")
@@ -80,7 +81,8 @@ class ClusterManager:
 class TestClusterBasic:
     """Basic cluster functionality tests."""
     
-    def __init__(self):
+    def __init__(self, cluster: ClusterManager):
+        self.cluster = cluster
         self.nodes: List[redis.Redis] = []
         
     def setup(self) -> bool:
@@ -168,6 +170,142 @@ class TestClusterBasic:
         print("  PASSED")
         return True
     
+    def _wait_for_ports_free(self, timeout: int = 30) -> bool:
+        """Wait for all ports to be free."""
+        import socket
+        ports = [6379, 6380, 6381, 7001, 7002, 7003]
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            all_free = True
+            for port in ports:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('localhost', port))
+                sock.close()
+                if result == 0:  # Port is in use
+                    all_free = False
+                    break
+            if all_free:
+                return True
+            time.sleep(0.5)
+        return False
+    
+    def _close_all_connections(self):
+        """Close all Redis connections."""
+        for node in self.nodes:
+            try:
+                node.close()
+            except:
+                pass
+        self.nodes = []
+    
+    def test_restart_persistence(self) -> bool:
+        """Test that data persists after cluster restart."""
+        print("\nTest: Restart Persistence")
+        
+        # Step 1: Write some data
+        test_key_1 = "persistent_key_1"
+        test_value_1 = "persistent_value_1"
+        test_key_2 = "persistent_key_2"
+        test_value_2 = "persistent_value_2"
+        
+        print(f"  Writing initial data...")
+        try:
+            self.nodes[0].set(test_key_1, test_value_1)
+            self.nodes[0].set(test_key_2, test_value_2)
+            print(f"    SET '{test_key_1}' = '{test_value_1}'")
+            print(f"    SET '{test_key_2}' = '{test_value_2}'")
+        except redis.RedisError as e:
+            print(f"  FAILED: Failed to write initial data - {e}")
+            return False
+        
+        # Verify data is written
+        value = self.nodes[0].get(test_key_1)
+        if value != test_value_1:
+            print(f"  FAILED: Initial write verification failed")
+            return False
+        print("  Initial data written successfully")
+        
+        # Step 2: Close all connections before stopping
+        print("  Closing connections...")
+        self._close_all_connections()
+        time.sleep(1)
+        
+        # Step 3: Stop the cluster (without cleaning data)
+        print("  Stopping cluster...")
+        self.cluster.stop()
+        
+        # Wait longer for complete shutdown
+        print("  Waiting for complete shutdown...")
+        time.sleep(5)
+        
+        # Step 4: Restart the cluster
+        print("  Restarting cluster...")
+        if not self.cluster.start():
+            print("  FAILED: Failed to restart cluster")
+            return False
+        
+        # Step 5: Reconnect to nodes
+        print("  Reconnecting to nodes...")
+        if not self.setup():
+            print("  FAILED: Failed to reconnect to nodes")
+            return False
+        
+        # Step 5: Verify old data is still there
+        print("  Verifying old data persisted...")
+        try:
+            value_1 = self.nodes[0].get(test_key_1)
+            value_2 = self.nodes[0].get(test_key_2)
+            
+            if value_1 != test_value_1:
+                print(f"    FAILED: Key '{test_key_1}' should be '{test_value_1}' but got '{value_1}'")
+                return False
+            print(f"    '{test_key_1}': OK (got '{value_1}')")
+            
+            if value_2 != test_value_2:
+                print(f"    FAILED: Key '{test_key_2}' should be '{test_value_2}' but got '{value_2}'")
+                return False
+            print(f"    '{test_key_2}': OK (got '{value_2}')")
+            
+        except redis.RedisError as e:
+            print(f"  FAILED: Error reading persisted data - {e}")
+            return False
+        
+        # Step 6: Write new data after restart
+        print("  Writing new data after restart...")
+        new_key = "new_key_after_restart"
+        new_value = "new_value_after_restart"
+        
+        try:
+            self.nodes[0].set(new_key, new_value)
+            value = self.nodes[0].get(new_key)
+            if value != new_value:
+                print(f"  FAILED: New data write failed")
+                return False
+            print(f"    SET '{new_key}' = '{new_value}': OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: Error writing new data - {e}")
+            return False
+        
+        # Step 7: Verify all data (old + new) is readable from all nodes
+        print("  Verifying all data on all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                v1 = node.get(test_key_1)
+                v2 = node.get(test_key_2)
+                v3 = node.get(new_key)
+                
+                if v1 != test_value_1 or v2 != test_value_2 or v3 != new_value:
+                    print(f"    Node {i}: FAILED (data mismatch)")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -180,6 +318,7 @@ class TestClusterBasic:
         tests = [
             self.test_set_and_get,
             self.test_set_with_expiration,
+            self.test_restart_persistence,
         ]
         
         passed = 0
@@ -193,6 +332,8 @@ class TestClusterBasic:
                     failed += 1
             except Exception as e:
                 print(f"  EXCEPTION: {e}")
+                import traceback
+                traceback.print_exc()
                 failed += 1
         
         print("\n" + "="*50)
@@ -235,7 +376,7 @@ def main():
     
     try:
         # Run tests
-        tester = TestClusterBasic()
+        tester = TestClusterBasic(cluster)
         success = tester.run_all_tests()
         
         if success:

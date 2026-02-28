@@ -146,7 +146,8 @@ This will:
 2. Start a 3-node cluster
 3. Run SET/GET tests
 4. Verify data replication across nodes
-5. Stop the cluster
+5. Test persistence after cluster restart
+6. Stop the cluster
 
 ### Manual Cluster Testing
 

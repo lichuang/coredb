@@ -17,38 +17,6 @@ A Redis-compatible distributed KV database with strong consistency, built on Raf
 cargo build --release
 ```
 
-Or use the start script:
-
-```bash
-./scripts/start.sh build
-```
-
-### Run Single Node
-
-```bash
-# Run with default configuration
-cargo run -- --conf conf/node1.toml
-```
-
-### Run 3-Node Cluster
-
-```bash
-# Start all nodes
-./scripts/start.sh start
-
-# Check status
-./scripts/start.sh status
-
-# View logs
-./scripts/start.sh logs node1
-
-# Run basic test
-./scripts/start.sh test
-
-# Stop cluster
-./scripts/start.sh stop
-```
-
 ## Configuration
 
 CoreDB uses TOML configuration files. Example:
@@ -151,6 +119,52 @@ print(r.get('key'))
 | SET key value PX ms | Set with expiration (ms) | ✅ |
 | DEL key | Delete key | ✅ |
 | PING | Ping server | ✅ |
+
+## Testing
+
+### Unit Tests
+
+```bash
+cargo test
+```
+
+### Integration Tests (Python)
+
+The `tests/` directory contains Python-based integration tests that verify cluster functionality.
+
+```bash
+# Install dependencies
+cd tests
+pip install -r requirements.txt
+
+# Run integration tests
+python test_cluster.py
+```
+
+This will:
+1. Build the project
+2. Start a 3-node cluster
+3. Run SET/GET tests
+4. Verify data replication across nodes
+5. Stop the cluster
+
+### Manual Cluster Testing
+
+```bash
+cd tests
+
+# Start cluster
+./start.sh start
+
+# Check status
+./start.sh status
+
+# Stop cluster
+./start.sh stop
+
+# Clean up data
+./start.sh clean
+```
 
 ## Development
 

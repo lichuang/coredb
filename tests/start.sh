@@ -115,7 +115,7 @@ start() {
     fi
     
     # Start Node 1 (single mode, initializes cluster)
-    if ! start_node 1 "$PROJECT_ROOT/conf/node1.toml"; then
+    if ! start_node 1 "$SCRIPT_DIR/conf/node1.toml"; then
         echo -e "${RED}Failed to start Node 1${NC}"
         exit 1
     fi
@@ -136,12 +136,12 @@ start() {
     fi
     
     # Start Node 2
-    if ! start_node 2 "$PROJECT_ROOT/conf/node2.toml"; then
+    if ! start_node 2 "$SCRIPT_DIR/conf/node2.toml"; then
         echo -e "${YELLOW}Warning: Node 2 failed to start, continuing...${NC}"
     fi
     
     # Start Node 3
-    if ! start_node 3 "$PROJECT_ROOT/conf/node3.toml"; then
+    if ! start_node 3 "$SCRIPT_DIR/conf/node3.toml"; then
         echo -e "${YELLOW}Warning: Node 3 failed to start, continuing...${NC}"
     fi
     

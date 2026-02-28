@@ -72,6 +72,7 @@ server_addr = "0.0.0.0:6379"
 
 [raft]
 address = "127.0.0.1:7001"
+advertise_host = "localhost"
 single = true
 join = []
 

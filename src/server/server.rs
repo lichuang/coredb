@@ -203,8 +203,6 @@ impl Server {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-
   // Note: These tests would require a running Raft node
   // For now, we just verify the Server structure compiles correctly
   #[test]

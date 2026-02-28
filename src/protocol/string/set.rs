@@ -17,7 +17,7 @@ pub enum Expiration {
   /// PXAT timestamp-milliseconds - Set the specified Unix time at which the key will expire, in milliseconds
   PxAt(u64),
   /// KEEPTTL - Retain the time to live associated with the key
-  KeepTtl,
+  KeepTTL,
 }
 
 /// Set mode options (NX/XX)
@@ -145,7 +145,7 @@ impl SetParams {
           if params.expiration.is_some() {
             return None;
           }
-          params.expiration = Some(Expiration::KeepTtl);
+          params.expiration = Some(Expiration::KeepTTL);
           i += 1;
         }
         _ => return None, // Unknown option
@@ -177,17 +177,33 @@ impl Command for SetCommand {
       None => return Value::error("ERR wrong number of arguments for 'set' command"),
     };
 
+    // Get current timestamp once for all expiration calculations
+    let now = now_ms();
+
     // Calculate expiration timestamp in milliseconds
-    let expires_at = params.expiration.and_then(|exp| {
-      let now = now_ms();
-      match exp {
+    let expires_at = match params.expiration {
+      Some(Expiration::KeepTTL) => {
+        // Read existing value to get its expiration time
+        match server.get(&params.key).await {
+          Ok(Some(raw_value)) => {
+            match StringValue::deserialize(&raw_value) {
+              Ok(existing) if existing.is_expired(now) => None, // Expired, no TTL to keep
+              Ok(existing) => existing.expires_at, // Keep existing TTL (or None if no expiration)
+              Err(_) => None,                      // Corrupted, no TTL to keep
+            }
+          }
+          _ => None, // Key not found or error, no TTL to keep
+        }
+      }
+      Some(exp) => match exp {
         Expiration::Ex(seconds) => Some(now + seconds * 1000),
         Expiration::Px(millis) => Some(now + millis),
         Expiration::ExAt(timestamp) => Some(timestamp * 1000),
         Expiration::PxAt(timestamp) => Some(timestamp),
-        Expiration::KeepTtl => None, // TODO: Implement KEEPTTL
-      }
-    });
+        Expiration::KeepTTL => unreachable!(), // Handled above
+      },
+      None => None, // No expiration
+    };
 
     // Create StringValue and serialize
     let string_value = match expires_at {
@@ -198,7 +214,6 @@ impl Command for SetCommand {
 
     // TODO: Implement NX/XX mode logic
     // TODO: Implement GET option to return previous value
-    // TODO: Implement KEEPTTL for expiration
 
     // For now, just set the value (basic implementation)
     match server.set(params.key, serialized).await {
@@ -331,7 +346,7 @@ mod tests {
       Value::BulkString(Some(b"KEEPTTL".to_vec())),
     ];
     let params = SetParams::parse(&items).unwrap();
-    assert_eq!(params.expiration, Some(Expiration::KeepTtl));
+    assert_eq!(params.expiration, Some(Expiration::KeepTTL));
   }
 
   #[test]

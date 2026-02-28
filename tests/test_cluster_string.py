@@ -177,6 +177,64 @@ class TestClusterBasic:
         print("  PASSED")
         return True
     
+    def test_set_with_keepttl(self) -> bool:
+        """Test SET with KEEPTTL option."""
+        print("\nTest: SET with KEEPTTL")
+        
+        test_key = "keepttl_key"
+        initial_value = "initial_value"
+        new_value = "new_value_with_keepttl"
+        
+        # SET with 2 seconds expiration on a random node
+        write_node = self._get_random_node()
+        print(f"  SET with 2000ms TTL...")
+        try:
+            write_node.set(test_key, initial_value, px=2000)
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        # Verify initial value is readable
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Initial value not readable")
+            return False
+        print("  Initial value readable: OK")
+        
+        # Wait a bit (500ms) then update with KEEPTTL
+        print("  Waiting 500ms...")
+        time.sleep(0.5)
+        
+        # SET with KEEPTTL - should preserve the original expiration
+        print("  SET with KEEPTTL...")
+        try:
+            # Use execute_command to send raw KEEPTTL option
+            write_node.execute_command('SET', test_key, new_value, 'KEEPTTL')
+        except redis.RedisError as e:
+            print(f"  FAILED: SET KEEPTTL failed - {e}")
+            return False
+        
+        # Verify new value is readable
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: New value not readable, got '{value}'")
+            return False
+        print("  New value readable: OK")
+        
+        # Wait for the original expiration to pass (remaining ~1.5s + buffer)
+        print("  Waiting for original expiration (1.5s)...")
+        time.sleep(1.6)
+        
+        # Verify it's expired - if KEEPTTL worked, it should be gone
+        value = self._get_random_node().get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired but got '{value}'")
+            return False
+        print("  Key expired with original TTL: OK")
+        
+        print("  PASSED")
+        return True
+    
     def _wait_for_ports_free(self, timeout: int = 30) -> bool:
         """Wait for all ports to be free."""
         import socket
@@ -332,6 +390,7 @@ class TestClusterBasic:
         tests = [
             self.test_set_and_get,
             self.test_set_with_expiration,
+            self.test_set_with_keepttl,
             self.test_restart_persistence,
         ]
         

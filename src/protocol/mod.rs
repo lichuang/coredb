@@ -4,9 +4,8 @@
 //! Redis command handling.
 
 pub mod command;
-pub mod get;
 pub mod resp;
-pub mod set;
+pub mod string;
 
 pub use command::CommandFactory;
 pub use resp::{Parser, Value};

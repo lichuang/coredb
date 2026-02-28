@@ -1,6 +1,5 @@
-use crate::protocol::get::GetCommand;
 use crate::protocol::resp::Value;
-use crate::protocol::set::SetCommand;
+use crate::protocol::string::{GetCommand, SetCommand};
 use crate::server::Server;
 use async_trait::async_trait;
 use std::collections::HashMap;

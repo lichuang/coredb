@@ -14,6 +14,7 @@ Usage:
     python test_cluster.py
 """
 
+import random
 import subprocess
 import time
 import sys
@@ -84,6 +85,10 @@ class TestClusterBasic:
     def __init__(self, cluster: ClusterManager):
         self.cluster = cluster
         self.nodes: List[redis.Redis] = []
+    
+    def _get_random_node(self) -> redis.Redis:
+        """Get a random node from the cluster for writing."""
+        return random.choice(self.nodes)
         
     def setup(self) -> bool:
         """Setup connections to all nodes."""
@@ -109,10 +114,11 @@ class TestClusterBasic:
         test_key = "test_key"
         test_value = "test_value_123"
         
-        # SET to Node 1 (leader)
-        print(f"  SET '{test_key}' = '{test_value}' on Node 1...")
+        # SET to a random node
+        write_node = self._get_random_node()
+        print(f"  SET '{test_key}' = '{test_value}' on a random node...")
         try:
-            self.nodes[0].set(test_key, test_value)
+            write_node.set(test_key, test_value)
         except redis.RedisError as e:
             print(f"  FAILED: SET failed - {e}")
             return False
@@ -141,16 +147,17 @@ class TestClusterBasic:
         test_key = "expiring_key"
         test_value = "will_expire"
         
-        # SET with 500ms expiration
-        print(f"  SET with 500ms TTL...")
+        # SET with 500ms expiration on a random node
+        write_node = self._get_random_node()
+        print(f"  SET with 500ms TTL on a random node...")
         try:
-            self.nodes[0].set(test_key, test_value, px=500)
+            write_node.set(test_key, test_value, px=500)
         except redis.RedisError as e:
             print(f"  FAILED: SET failed - {e}")
             return False
         
-        # Verify it's readable immediately
-        value = self.nodes[0].get(test_key)
+        # Verify it's readable immediately from the same node
+        value = write_node.get(test_key)
         if value != test_value:
             print(f"  FAILED: Key not readable immediately after write")
             return False
@@ -211,8 +218,9 @@ class TestClusterBasic:
         
         print(f"  Writing initial data...")
         try:
-            self.nodes[0].set(test_key_1, test_value_1)
-            self.nodes[0].set(test_key_2, test_value_2)
+            write_node = self._get_random_node()
+            write_node.set(test_key_1, test_value_1)
+            write_node.set(test_key_2, test_value_2)
             print(f"    SET '{test_key_1}' = '{test_value_1}'")
             print(f"    SET '{test_key_2}' = '{test_value_2}'")
         except redis.RedisError as e:
@@ -220,11 +228,15 @@ class TestClusterBasic:
             return False
         
         # Verify data is written
-        value = self.nodes[0].get(test_key_1)
+        verify_node = self._get_random_node()
+        value = verify_node.get(test_key_1)
         if value != test_value_1:
             print(f"  FAILED: Initial write verification failed")
             return False
         print("  Initial data written successfully")
+        
+        # Remember the write node for later verification
+        initial_write_node = write_node
         
         # Step 2: Close all connections before stopping
         print("  Closing connections...")
@@ -254,8 +266,9 @@ class TestClusterBasic:
         # Step 5: Verify old data is still there
         print("  Verifying old data persisted...")
         try:
-            value_1 = self.nodes[0].get(test_key_1)
-            value_2 = self.nodes[0].get(test_key_2)
+            verify_node = self._get_random_node()
+            value_1 = verify_node.get(test_key_1)
+            value_2 = verify_node.get(test_key_2)
             
             if value_1 != test_value_1:
                 print(f"    FAILED: Key '{test_key_1}' should be '{test_value_1}' but got '{value_1}'")
@@ -277,8 +290,9 @@ class TestClusterBasic:
         new_value = "new_value_after_restart"
         
         try:
-            self.nodes[0].set(new_key, new_value)
-            value = self.nodes[0].get(new_key)
+            write_node = self._get_random_node()
+            write_node.set(new_key, new_value)
+            value = write_node.get(new_key)
             if value != new_value:
                 print(f"  FAILED: New data write failed")
                 return False

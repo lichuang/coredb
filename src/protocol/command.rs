@@ -1,3 +1,4 @@
+use crate::protocol::hash::{HGetCommand, HSetCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{GetCommand, SetCommand};
 use crate::server::Server;
@@ -33,9 +34,13 @@ impl CommandFactory {
   pub fn init() -> Self {
     let mut factory = Self::new();
 
-    // Register GET and SET commands
+    // Register string commands
     factory.register("GET", GetCommand);
     factory.register("SET", SetCommand);
+
+    // Register hash commands
+    factory.register("HGET", HGetCommand);
+    factory.register("HSET", HSetCommand);
 
     factory
   }
@@ -75,5 +80,7 @@ mod tests {
     // Just verify factory is initialized correctly
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("SET"));
+    assert!(factory.commands.contains_key("HGET"));
+    assert!(factory.commands.contains_key("HSET"));
   }
 }

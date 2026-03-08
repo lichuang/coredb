@@ -176,9 +176,7 @@ pub struct HashFieldValue {
 impl HashFieldValue {
   /// Create a new HashFieldValue
   pub fn new(data: impl Into<Vec<u8>>) -> Self {
-    Self {
-      data: data.into(),
-    }
+    Self { data: data.into() }
   }
 
   /// Serialize to bytes using postcard
@@ -421,7 +419,10 @@ mod tests {
     let key_len = u32::from_be_bytes([sub_key[0], sub_key[1], sub_key[2], sub_key[3]]) as usize;
     assert_eq!(key_len, key.len());
     assert_eq!(&sub_key[4..4 + key_len], key);
-    assert_eq!(&sub_key[4 + key_len..4 + key_len + 8], &version.to_be_bytes());
+    assert_eq!(
+      &sub_key[4 + key_len..4 + key_len + 8],
+      &version.to_be_bytes()
+    );
     assert_eq!(&sub_key[4 + key_len + 8..], field);
   }
 

@@ -1,4 +1,4 @@
-use crate::encoding::{StringValue, NO_EXPIRATION};
+use crate::encoding::{NO_EXPIRATION, StringValue};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -189,8 +189,8 @@ impl Command for SetCommand {
             match StringValue::deserialize(&raw_value) {
               Ok(existing) if existing.is_expired(now) => NO_EXPIRATION, // Expired, no TTL to keep
               Ok(existing) if existing.has_expiration() => existing.expires_at, // Keep existing TTL
-              Ok(_) => NO_EXPIRATION,              // No existing expiration to keep
-              Err(_) => NO_EXPIRATION,             // Corrupted, no TTL to keep
+              Ok(_) => NO_EXPIRATION,  // No existing expiration to keep
+              Err(_) => NO_EXPIRATION, // Corrupted, no TTL to keep
             }
           }
           _ => NO_EXPIRATION, // Key not found or error, no TTL to keep

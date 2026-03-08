@@ -29,3 +29,5 @@ target
 **/__pycache__/
 *.pyc
 *.pyo
+
+commit-message

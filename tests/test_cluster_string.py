@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CoreDB Cluster Integration Tests
+CoreDB Cluster String Integration Tests
 
 This test suite:
 1. Starts a 3-node CoreDB cluster
@@ -11,101 +11,27 @@ This test suite:
 
 Usage:
     pip install -r requirements.txt
-    python test_cluster.py
+    python test_cluster_string.py
 """
 
 import random
-import subprocess
 import time
 import sys
 import os
 import signal
-from typing import List
 
 import redis
 
-
-class ClusterManager:
-    """Manages CoreDB cluster lifecycle for testing."""
-    
-    def __init__(self, tests_dir: str):
-        self.tests_dir = tests_dir
-        self.start_script = os.path.join(tests_dir, "start.sh")
-        
-    def _run_command(self, cmd: List[str], check: bool = True) -> subprocess.CompletedProcess:
-        """Run a command in the tests directory."""
-        return subprocess.run(
-            cmd,
-            cwd=self.tests_dir,
-            capture_output=True,
-            text=True,
-            check=check
-        )
-    
-    def build(self) -> bool:
-        """Build the CoreDB project."""
-        print("Building CoreDB...")
-        result = self._run_command(["./start.sh", "build"], check=False)
-        if result.returncode != 0:
-            print(f"Build failed:\n{result.stdout}\n{result.stderr}")
-            return False
-        print("Build successful")
-        return True
-    
-    def start(self) -> bool:
-        """Start the 3-node cluster."""
-        print("Starting CoreDB cluster...")
-        result = self._run_command(["./start.sh", "start"], check=False)
-        if result.returncode != 0:
-            print(f"Failed to start cluster:\n{result.stdout}\n{result.stderr}")
-            return False
-        
-        # Wait for cluster to be ready
-        print("Waiting for cluster to be ready...")
-        time.sleep(3)
-        
-        print("Cluster started successfully")
-        return True
-    
-    def stop(self) -> None:
-        """Stop the cluster (without cleaning data)."""
-        print("Stopping CoreDB cluster...")
-        self._run_command(["./start.sh", "stop"], check=False)
-        print("Cluster stopped")
-    
-    def clean(self) -> None:
-        """Clean up data and logs."""
-        print("Cleaning up...")
-        self._run_command(["./start.sh", "clean"], check=False)
+from cluster_manager import ClusterManager
+from base_test import TestClusterBase
 
 
-class TestClusterBasic:
-    """Basic cluster functionality tests."""
+class TestClusterString(TestClusterBase):
+    """String command tests."""
     
-    def __init__(self, cluster: ClusterManager):
-        self.cluster = cluster
-        self.nodes: List[redis.Redis] = []
-    
-    def _get_random_node(self) -> redis.Redis:
-        """Get a random node from the cluster for writing."""
-        return random.choice(self.nodes)
-        
-    def setup(self) -> bool:
-        """Setup connections to all nodes."""
-        try:
-            self.nodes = [
-                redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=5),
-                redis.Redis(host='localhost', port=6380, decode_responses=True, socket_connect_timeout=5),
-                redis.Redis(host='localhost', port=6381, decode_responses=True, socket_connect_timeout=5),
-            ]
-            # Verify connections with a simple SET/GET
-            for i, node in enumerate(self.nodes, 1):
-                node.set('_test_conn', 'ok')
-                print(f"  Connected to Node {i} (port {6378 + i})")
-            return True
-        except redis.RedisError as e:
-            print(f"Failed to connect to nodes: {e}")
-            return False
+    def _verify_connection(self, node: redis.Redis) -> None:
+        """Verify connection using SET/GET."""
+        node.set('_test_conn', 'ok')
     
     def test_set_and_get(self) -> bool:
         """Test basic SET and GET operations."""
@@ -381,7 +307,7 @@ class TestClusterBasic:
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
-        print("Running Tests")
+        print("Running String Tests")
         print("="*50)
         
         if not self.setup():
@@ -449,13 +375,13 @@ def main():
     
     try:
         # Run tests
-        tester = TestClusterBasic(cluster)
+        tester = TestClusterString(cluster)
         success = tester.run_all_tests()
         
         if success:
-            print("\n✅ All tests passed!")
+            print("\n✅ All string tests passed!")
         else:
-            print("\n❌ Some tests failed!")
+            print("\n❌ Some string tests failed!")
             
     finally:
         # Always stop cluster

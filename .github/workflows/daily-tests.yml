@@ -64,7 +64,7 @@ jobs:
       - name: Run integration tests
         run: |
           cd tests
-          python test_cluster_string.py
+          python run_all_tests.py
         timeout-minutes: 10
 
       - name: Upload test logs on failure

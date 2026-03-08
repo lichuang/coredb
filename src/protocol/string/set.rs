@@ -1,4 +1,4 @@
-use crate::encoding::StringValue;
+use crate::encoding::{StringValue, NO_EXPIRATION};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -180,35 +180,37 @@ impl Command for SetCommand {
     // Get current timestamp once for all expiration calculations
     let now = now_ms();
 
-    // Calculate expiration timestamp in milliseconds
+    // Calculate expiration timestamp in milliseconds (0 means no expiration)
     let expires_at = match params.expiration {
       Some(Expiration::KeepTTL) => {
         // Read existing value to get its expiration time
         match server.get(&params.key).await {
           Ok(Some(raw_value)) => {
             match StringValue::deserialize(&raw_value) {
-              Ok(existing) if existing.is_expired(now) => None, // Expired, no TTL to keep
-              Ok(existing) => existing.expires_at, // Keep existing TTL (or None if no expiration)
-              Err(_) => None,                      // Corrupted, no TTL to keep
+              Ok(existing) if existing.is_expired(now) => NO_EXPIRATION, // Expired, no TTL to keep
+              Ok(existing) if existing.has_expiration() => existing.expires_at, // Keep existing TTL
+              Ok(_) => NO_EXPIRATION,              // No existing expiration to keep
+              Err(_) => NO_EXPIRATION,             // Corrupted, no TTL to keep
             }
           }
-          _ => None, // Key not found or error, no TTL to keep
+          _ => NO_EXPIRATION, // Key not found or error, no TTL to keep
         }
       }
       Some(exp) => match exp {
-        Expiration::Ex(seconds) => Some(now + seconds * 1000),
-        Expiration::Px(millis) => Some(now + millis),
-        Expiration::ExAt(timestamp) => Some(timestamp * 1000),
-        Expiration::PxAt(timestamp) => Some(timestamp),
+        Expiration::Ex(seconds) => now + seconds * 1000,
+        Expiration::Px(millis) => now + millis,
+        Expiration::ExAt(timestamp) => timestamp * 1000,
+        Expiration::PxAt(timestamp) => timestamp,
         Expiration::KeepTTL => unreachable!(), // Handled above
       },
-      None => None, // No expiration
+      None => NO_EXPIRATION, // No expiration
     };
 
     // Create StringValue and serialize
-    let string_value = match expires_at {
-      Some(exp) => StringValue::with_expiration(params.value, exp),
-      None => StringValue::new(params.value),
+    let string_value = if expires_at == NO_EXPIRATION {
+      StringValue::new(params.value)
+    } else {
+      StringValue::with_expiration(params.value, expires_at)
     };
     let serialized = string_value.serialize();
 

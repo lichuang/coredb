@@ -1,14 +1,46 @@
 //! String type encoding/decoding for storage
+//!
+//! String data is stored directly at the key location with metadata
+//! prepended to the actual data. This is simpler than Hash/List/Set
+//! types which need to store metadata and sub-keys separately.
+//!
+//! # Storage Layout
+//!
+//! ## String Value
+//! ```text
+//! +-----------+------------+--------------------+
+//! |   flags   | expires_at |       data         |
+//! | (1byte)   |  (8byte)   |     (Nbyte)        |
+//! +-----------+------------+--------------------+
+//! ```
+//!
+//! - `flags`: high 4 bits = encoding version, low 4 bits = data type
+//! - `expires_at`: expiration timestamp in milliseconds, 0 means no expiration
+//! - `data`: user's raw value bytes
+//!
+//! ## Example
+//!
+//! When user executes `SET key value`:
+//! - The key is used as the RocksDB key
+//! - The value is encoded as: `flags | expires_at | data`
+//!
+//! For `SET key value EX 60`:
+//! - expires_at = current_timestamp + 60 * 1000
+//!
+//! For `SET key value` without TTL:
+//! - expires_at = NO_EXPIRATION (0)
 
 use serde::{Deserialize, Serialize};
+
+use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
 
 /// String value structure for storage
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StringValue {
-  /// Format version
-  pub version: u8,
-  /// Optional expiration timestamp in milliseconds (Unix timestamp)
-  pub expires_at: Option<u64>,
+  /// Flags field: high 4 bits = encoding version, low 4 bits = data type
+  pub flags: u8,
+  /// Expiration timestamp in milliseconds (Unix timestamp), 0 means no expiration
+  pub expires_at: u64,
   /// Actual data
   pub data: Vec<u8>,
 }
@@ -17,8 +49,8 @@ impl StringValue {
   /// Create a new StringValue without expiration
   pub fn new(data: impl Into<Vec<u8>>) -> Self {
     Self {
-      version: super::CURRENT_VERSION,
-      expires_at: None,
+      flags: CURRENT_VERSION,
+      expires_at: NO_EXPIRATION,
       data: data.into(),
     }
   }
@@ -26,8 +58,8 @@ impl StringValue {
   /// Create a new StringValue with expiration timestamp (in milliseconds)
   pub fn with_expiration(data: impl Into<Vec<u8>>, expires_at: u64) -> Self {
     Self {
-      version: super::CURRENT_VERSION,
-      expires_at: Some(expires_at),
+      flags: CURRENT_VERSION,
+      expires_at: expires_at,
       data: data.into(),
     }
   }
@@ -44,10 +76,15 @@ impl StringValue {
 
   /// Check if this value has expired (given current timestamp in milliseconds)
   pub fn is_expired(&self, now_ms: u64) -> bool {
-    match self.expires_at {
-      Some(exp) => now_ms >= exp,
-      None => false,
+    if self.expires_at == NO_EXPIRATION {
+      return false;
     }
+    now_ms >= self.expires_at
+  }
+
+  /// Check if this value has an expiration time set
+  pub fn has_expiration(&self) -> bool {
+    self.expires_at != NO_EXPIRATION
   }
 }
 
@@ -71,6 +108,7 @@ impl std::error::Error for DecodeError {}
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
 
   #[test]
   fn test_encode_decode_without_expiration() {
@@ -79,8 +117,8 @@ mod tests {
     let decoded = StringValue::deserialize(&encoded).unwrap();
 
     assert_eq!(value, decoded);
-    assert_eq!(decoded.version, crate::encoding::CURRENT_VERSION);
-    assert_eq!(decoded.expires_at, None);
+    assert_eq!(decoded.flags, CURRENT_VERSION);
+    assert_eq!(decoded.expires_at, NO_EXPIRATION);
     assert_eq!(decoded.data, b"hello world");
   }
 
@@ -91,8 +129,8 @@ mod tests {
     let decoded = StringValue::deserialize(&encoded).unwrap();
 
     assert_eq!(value, decoded);
-    assert_eq!(decoded.version, crate::encoding::CURRENT_VERSION);
-    assert_eq!(decoded.expires_at, Some(1893456000000));
+    assert_eq!(decoded.flags, CURRENT_VERSION);
+    assert_eq!(decoded.expires_at, 1893456000000);
     assert_eq!(decoded.data, b"hello world");
   }
 
@@ -119,11 +157,13 @@ mod tests {
   #[test]
   fn test_is_expired() {
     let value = StringValue::with_expiration(b"data", 1000);
+    assert!(value.has_expiration());
     assert!(value.is_expired(1000));
     assert!(value.is_expired(1001));
     assert!(!value.is_expired(999));
 
     let value_no_exp = StringValue::new(b"data");
+    assert!(!value_no_exp.has_expiration());
     assert!(!value_no_exp.is_expired(u64::MAX));
   }
 
@@ -139,15 +179,15 @@ mod tests {
 
   #[test]
   fn test_version_compatibility() {
-    // Test that we can decode data with different version numbers
+    // Test that we can decode data with different flags values
     let value = StringValue {
-      version: 42, // Some future version
-      expires_at: None,
+      flags: 42, // Some future flags value
+      expires_at: NO_EXPIRATION,
       data: b"test".to_vec(),
     };
     let encoded = value.serialize();
     let decoded = StringValue::deserialize(&encoded).unwrap();
 
-    assert_eq!(decoded.version, 42);
+    assert_eq!(decoded.flags, 42);
   }
 }

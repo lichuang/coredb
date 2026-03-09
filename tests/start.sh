@@ -91,8 +91,25 @@ start_node() {
     return 0
 }
 
-# Start all nodes
+# Start all nodes or a specific node
 start() {
+    # Check if a specific node is requested
+    local target_node="${1:-all}"
+    
+    if [ "$target_node" != "all" ]; then
+        # Validate node name
+        case "$target_node" in
+            node1) start_node 1 "$SCRIPT_DIR/conf/node1.toml" ;;
+            node2) start_node 2 "$SCRIPT_DIR/conf/node2.toml" ;;
+            node3) start_node 3 "$SCRIPT_DIR/conf/node3.toml" ;;
+            *)
+                echo -e "${RED}Error: Unknown node '$target_node'. Use node1, node2, or node3.${NC}"
+                exit 1
+                ;;
+        esac
+        return $?
+    fi
+    
     echo "Starting CoreDB cluster..."
     
     # Check binary
@@ -155,39 +172,61 @@ start() {
     echo "Run './start.sh status' to check status"
 }
 
-# Stop all nodes
+# Stop a specific node by index
+stop_node() {
+    local i=$1
+    local pid_file="$PID_DIR/node$i.pid"
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
+            echo "Stopping Node $i (PID: $pid)..."
+            kill "$pid" 2>/dev/null || true
+            # Wait for process to terminate
+            local j=0
+            while [ $j -lt 20 ]; do
+                if ! ps -p "$pid" > /dev/null 2>&1; then
+                    break
+                fi
+                sleep 0.5
+                j=$((j + 1))
+            done
+            # Force kill if still running
+            if ps -p "$pid" > /dev/null 2>&1; then
+                echo "Force killing Node $i..."
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+            echo -e "${GREEN}Node $i stopped${NC}"
+        else
+            echo -e "${YELLOW}Node $i was not running${NC}"
+        fi
+        rm -f "$pid_file"
+    else
+        echo -e "${YELLOW}Node $i PID file not found${NC}"
+    fi
+}
+
+# Stop all nodes or a specific node
 stop() {
+    # Check if a specific node is requested
+    local target_node="${1:-all}"
+    
+    if [ "$target_node" != "all" ]; then
+        case "$target_node" in
+            node1) stop_node 1 ;;
+            node2) stop_node 2 ;;
+            node3) stop_node 3 ;;
+            *)
+                echo -e "${RED}Error: Unknown node '$target_node'. Use node1, node2, or node3.${NC}"
+                exit 1
+                ;;
+        esac
+        return 0
+    fi
+    
     echo "Stopping CoreDB cluster..."
     
     for i in 1 2 3; do
-        local pid_file="$PID_DIR/node$i.pid"
-        if [ -f "$pid_file" ]; then
-            local pid=$(cat "$pid_file" 2>/dev/null)
-            if [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1; then
-                echo "Stopping Node $i (PID: $pid)..."
-                kill "$pid" 2>/dev/null || true
-                # Wait for process to terminate
-                local j=0
-                while [ $j -lt 20 ]; do
-                    if ! ps -p "$pid" > /dev/null 2>&1; then
-                        break
-                    fi
-                    sleep 0.5
-                    j=$((j + 1))
-                done
-                # Force kill if still running
-                if ps -p "$pid" > /dev/null 2>&1; then
-                    echo "Force killing Node $i..."
-                    kill -9 "$pid" 2>/dev/null || true
-                fi
-                echo -e "${GREEN}Node $i stopped${NC}"
-            else
-                echo -e "${YELLOW}Node $i was not running${NC}"
-            fi
-            rm -f "$pid_file"
-        else
-            echo -e "${YELLOW}Node $i PID file not found${NC}"
-        fi
+        stop_node $i
     done
     
     # Also kill any remaining coredb processes
@@ -287,15 +326,31 @@ case "${1:-}" in
         build
         ;;
     start)
-        start
+        # Check if second arg is a specific node
+        if [ -n "${2:-}" ]; then
+            start "$2"
+        else
+            start
+        fi
         ;;
     stop)
-        stop
+        # Check if second arg is a specific node
+        if [ -n "${2:-}" ]; then
+            stop "$2"
+        else
+            stop
+        fi
         ;;
     restart)
-        stop
-        sleep 2
-        start
+        if [ -n "${2:-}" ]; then
+            stop "$2"
+            sleep 2
+            start "$2"
+        else
+            stop
+            sleep 2
+            start
+        fi
         ;;
     status)
         status
@@ -312,21 +367,24 @@ case "${1:-}" in
     *)
         echo "CoreDB Cluster Management Script"
         echo ""
-        echo "Usage: $0 [command]"
+        echo "Usage: $0 [command] [node]"
         echo ""
         echo "Commands:"
-        echo "  build       Build the project"
-        echo "  start       Start all nodes"
-        echo "  stop        Stop all nodes"
-        echo "  restart     Restart all nodes"
-        echo "  status      Show cluster status"
-        echo "  logs <node> View logs for a node (node1|node2|node3)"
-        echo "  clean       Stop and clean up all data"
-        echo "  test        Run basic cluster test"
+        echo "  build                   Build the project"
+        echo "  start [node]            Start all nodes or a specific node (node1|node2|node3)"
+        echo "  stop [node]             Stop all nodes or a specific node"
+        echo "  restart [node]          Restart all nodes or a specific node"
+        echo "  status                  Show cluster status"
+        echo "  logs <node>             View logs for a node (node1|node2|node3)"
+        echo "  clean                   Stop and clean up all data"
+        echo "  test                    Run basic cluster test"
         echo ""
         echo "Examples:"
         echo "  $0 build"
-        echo "  $0 start"
+        echo "  $0 start                # Start all nodes"
+        echo "  $0 start node1          # Start only node 1"
+        echo "  $0 stop node2           # Stop only node 2"
+        echo "  $0 restart node3        # Restart only node 3"
         echo "  $0 status"
         echo "  $0 logs node1"
         echo "  $0 test"

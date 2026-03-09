@@ -53,7 +53,7 @@ class TestClusterString(TestClusterBase):
         print("  GET from all nodes...")
         for i, node in enumerate(self.nodes, 1):
             try:
-                value = node.get(test_key)
+                value = node.conn.get(test_key)
                 if value == test_value:
                     print(f"    Node {i}: OK (got '{value}')")
                 else:
@@ -94,7 +94,7 @@ class TestClusterString(TestClusterBase):
         time.sleep(1)
         
         # Verify it's expired (returns None)
-        value = self.nodes[0].get(test_key)
+        value = self.nodes[0].conn.get(test_key)
         if value is not None:
             print(f"  FAILED: Key should have expired but got '{value}'")
             return False
@@ -185,10 +185,9 @@ class TestClusterString(TestClusterBase):
         """Close all Redis connections."""
         for node in self.nodes:
             try:
-                node.close()
+                node.conn.close()
             except:
                 pass
-        self.nodes = []
     
     def test_restart_persistence(self) -> bool:
         """Test that data persists after cluster restart."""
@@ -289,9 +288,9 @@ class TestClusterString(TestClusterBase):
         print("  Verifying all data on all nodes...")
         for i, node in enumerate(self.nodes, 1):
             try:
-                v1 = node.get(test_key_1)
-                v2 = node.get(test_key_2)
-                v3 = node.get(new_key)
+                v1 = node.conn.get(test_key_1)
+                v2 = node.conn.get(test_key_2)
+                v3 = node.conn.get(new_key)
                 
                 if v1 != test_value_1 or v2 != test_value_2 or v3 != new_value:
                     print(f"    Node {i}: FAILED (data mismatch)")
@@ -302,6 +301,69 @@ class TestClusterString(TestClusterBase):
                 return False
         
         print("  PASSED")
+        return True
+    
+    def test_chaos_set_get(self) -> bool:
+        """Test SET/GET operations with one random node killed, then verify recovery."""
+        print("\nTest: Chaos - SET/GET with one node down + recovery verification")
+        
+        test_key = "chaos_test_key"
+        test_value = "chaos_test_value"
+        killed_node = None
+        
+        # Use auto_recover=True so nodes are recovered when context exits
+        with self.chaos_context(kill_count=1, auto_recover=True) as killed_nodes:
+            print(f"  [Chaos] Running test with 1 node(s) down...")
+            
+            # Record the killed node (before it's recovered)
+            if killed_nodes:
+                killed_node = killed_nodes[0]
+                print(f"  [Chaos] Killed: {killed_node}")
+            
+            # Get alive nodes for write/read
+            alive = self.get_alive_nodes()
+            if len(alive) < 2:
+                print("  FAILED: Not enough alive nodes for test")
+                return False
+            
+            write_node = random.choice(alive)
+            read_node = random.choice([n for n in alive if n != write_node])
+            
+            # Write to an alive node
+            print(f"  SET '{test_key}' = '{test_value}' on {write_node}...")
+            try:
+                write_node.conn.set(test_key, test_value)
+            except redis.RedisError as e:
+                print(f"  FAILED: SET failed - {e}")
+                return False
+            
+            # Read from another alive node
+            print(f"  GET from {read_node}...")
+            try:
+                value = read_node.conn.get(test_key)
+                if value != test_value:
+                    print(f"  FAILED: Expected '{test_value}', got '{value}'")
+                    return False
+                print(f"  OK: Read '{value}' from surviving node")
+            except redis.RedisError as e:
+                print(f"  FAILED: GET failed - {e}")
+                return False
+        
+        # After context exit, nodes are recovered. Verify killed node has the data.
+        if killed_node and killed_node.alive:
+            print(f"  Verifying recovered {killed_node} has the data...")
+            try:
+                value = killed_node.conn.get(test_key)
+                if value == test_value:
+                    print(f"  OK: Recovered node has '{value}'")
+                    return True
+                else:
+                    print(f"  FAILED: Recovered node has '{value}', expected '{test_value}'")
+                    return False
+            except redis.RedisError as e:
+                print(f"  FAILED: GET from recovered node failed - {e}")
+                return False
+        
         return True
     
     def run_all_tests(self) -> bool:
@@ -318,6 +380,7 @@ class TestClusterString(TestClusterBase):
             self.test_set_with_expiration,
             self.test_set_with_keepttl,
             self.test_restart_persistence,
+            self.test_chaos_set_get,  # Chaos test enabled
         ]
         
         passed = 0

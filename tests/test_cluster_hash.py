@@ -56,7 +56,7 @@ class TestClusterHash(TestClusterBase):
         print("  HGET from all nodes...")
         for i, node in enumerate(self.nodes, 1):
             try:
-                value = node.hget(test_key, test_field)
+                value = node.conn.hget(test_key, test_field)
                 if value == test_value:
                     print(f"    Node {i}: OK (got '{value}')")
                 else:
@@ -98,7 +98,7 @@ class TestClusterHash(TestClusterBase):
         for i, node in enumerate(self.nodes, 1):
             try:
                 for field, expected_value in fields.items():
-                    value = node.hget(test_key, field)
+                    value = node.conn.hget(test_key, field)
                     if value != expected_value:
                         print(f"    Node {i}, field '{field}': FAILED (expected '{expected_value}', got '{value}')")
                         return False
@@ -146,7 +146,7 @@ class TestClusterHash(TestClusterBase):
         print("  Verify updated value from all nodes...")
         for i, node in enumerate(self.nodes, 1):
             try:
-                value = node.hget(test_key, test_field)
+                value = node.conn.hget(test_key, test_field)
                 if value == updated_value:
                     print(f"    Node {i}: OK (got '{value}')")
                 else:
@@ -196,6 +196,73 @@ class TestClusterHash(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_chaos_hset_hget(self) -> bool:
+        """Test HSET/HGET operations with one random node killed, then verify recovery."""
+        print("\nTest: Chaos - HSET/HGET with one node down + recovery verification")
+        
+        test_key = "chaos_test_hash"
+        test_field = "chaos_field"
+        test_value = "chaos_value"
+        killed_node = None
+        
+        # Use auto_recover=True so nodes are recovered when context exits
+        with self.chaos_context(kill_count=1, auto_recover=True) as killed_nodes:
+            print(f"  [Chaos] Running test with 1 node(s) down...")
+            
+            # Record the killed node (before it's recovered)
+            if killed_nodes:
+                killed_node = killed_nodes[0]
+                print(f"  [Chaos] Killed: {killed_node}")
+            
+            # Get alive nodes for write/read
+            alive = self.get_alive_nodes()
+            if len(alive) < 2:
+                print("  FAILED: Not enough alive nodes for test")
+                return False
+            
+            write_node = random.choice(alive)
+            read_node = random.choice([n for n in alive if n != write_node])
+            
+            # Write to an alive node
+            print(f"  HSET '{test_key}' '{test_field}' = '{test_value}' on {write_node}...")
+            try:
+                result = write_node.conn.hset(test_key, test_field, test_value)
+                if result != 1:
+                    print(f"  FAILED: Expected return 1, got {result}")
+                    return False
+            except redis.RedisError as e:
+                print(f"  FAILED: HSET failed - {e}")
+                return False
+            
+            # Read from another alive node
+            print(f"  HGET from {read_node}...")
+            try:
+                value = read_node.conn.hget(test_key, test_field)
+                if value != test_value:
+                    print(f"  FAILED: Expected '{test_value}', got '{value}'")
+                    return False
+                print(f"  OK: Read '{value}' from surviving node")
+            except redis.RedisError as e:
+                print(f"  FAILED: HGET failed - {e}")
+                return False
+        
+        # After context exit, nodes are recovered. Verify killed node has the data.
+        if killed_node and killed_node.alive:
+            print(f"  Verifying recovered {killed_node} has the data...")
+            try:
+                value = killed_node.conn.hget(test_key, test_field)
+                if value == test_value:
+                    print(f"  OK: Recovered node has '{value}'")
+                    return True
+                else:
+                    print(f"  FAILED: Recovered node has '{value}', expected '{test_value}'")
+                    return False
+            except redis.RedisError as e:
+                print(f"  FAILED: HGET from recovered node failed - {e}")
+                return False
+        
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -210,6 +277,7 @@ class TestClusterHash(TestClusterBase):
             self.test_hset_multiple_fields,
             self.test_hset_update_existing,
             self.test_hget_nonexistent,
+            self.test_chaos_hset_hget,
         ]
         
         passed = 0

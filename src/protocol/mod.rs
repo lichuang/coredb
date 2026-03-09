@@ -4,6 +4,7 @@
 //! Redis command handling.
 
 pub mod command;
+pub mod connection;
 pub mod hash;
 pub mod resp;
 pub mod string;

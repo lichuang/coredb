@@ -152,7 +152,7 @@ print(r.get('key'))
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `PING [message]` | Ping server | ❌ |
+| `PING [message]` | Ping server | ✅ |
 | `ECHO message` | Echo message | ❌ |
 | `SELECT index` | Select database | ❌ |
 | `QUIT` | Close connection | ❌ |

@@ -1,3 +1,4 @@
+use crate::protocol::connection::PingCommand;
 use crate::protocol::hash::{HGetCommand, HSetCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{GetCommand, SetCommand};
@@ -33,6 +34,9 @@ impl CommandFactory {
   /// Initialize the command factory with all supported commands
   pub fn init() -> Self {
     let mut factory = Self::new();
+
+    // Register connection commands
+    factory.register("PING", PingCommand);
 
     // Register string commands
     factory.register("GET", GetCommand);
@@ -78,6 +82,7 @@ mod tests {
     let factory = CommandFactory::init();
 
     // Just verify factory is initialized correctly
+    assert!(factory.commands.contains_key("PING"));
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("SET"));
     assert!(factory.commands.contains_key("HGET"));

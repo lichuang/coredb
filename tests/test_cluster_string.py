@@ -29,10 +29,6 @@ from base_test import TestClusterBase
 class TestClusterString(TestClusterBase):
     """String command tests."""
     
-    def _verify_connection(self, node: redis.Redis) -> None:
-        """Verify connection using SET/GET."""
-        node.set('_test_conn', 'ok')
-    
     def test_set_and_get(self) -> bool:
         """Test basic SET and GET operations."""
         print("\nTest: SET and GET")

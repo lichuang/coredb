@@ -74,9 +74,6 @@ impl Command for HGetCommand {
 
 #[cfg(test)]
 mod tests {
-  use super::*;
-  use crate::protocol::resp::Value;
-
   #[test]
   fn test_hget_params_parsing() {
     // Test would require a running server, so we just verify structure

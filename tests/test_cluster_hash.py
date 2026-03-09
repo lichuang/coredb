@@ -29,10 +29,6 @@ from base_test import TestClusterBase
 class TestClusterHash(TestClusterBase):
     """Hash command tests."""
     
-    def _verify_connection(self, node: redis.Redis) -> None:
-        """Verify connection using HSET/HGET."""
-        node.hset('_test_conn', 'field', 'ok')
-    
     def test_hset_and_hget(self) -> bool:
         """Test basic HSET and HGET operations."""
         print("\nTest: HSET and HGET")

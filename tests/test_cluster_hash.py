@@ -7,7 +7,8 @@ This test suite:
 2. Performs basic HSET/HGET operations
 3. Verifies data replication across nodes
 4. Tests multiple fields in a hash
-5. Stops the cluster
+5. Tests NX and XX options
+6. Stops the cluster
 
 Usage:
     pip install -r requirements.txt
@@ -70,25 +71,27 @@ class TestClusterHash(TestClusterBase):
         return True
     
     def test_hset_multiple_fields(self) -> bool:
-        """Test HSET with multiple fields."""
-        print("\nTest: HSET Multiple Fields")
+        """Test HSET with multiple fields in one command."""
+        print("\nTest: HSET Multiple Fields (Single Command)")
         
-        test_key = "test_hash_multi"
+        test_key = "test_hash_multi_single"
+        # Use mapping parameter for multiple fields in one HSET call
         fields = {
             "name": "John",
             "age": "30",
             "city": "New York"
         }
         
-        # HSET multiple fields
+        # HSET multiple fields using mapping
         write_node = self._get_random_node()
-        print(f"  HSET '{test_key}' with multiple fields...")
+        print(f"  HSET '{test_key}' with multiple fields in one command...")
         try:
-            for field, value in fields.items():
-                result = write_node.hset(test_key, field, value)
-                if result != 1:
-                    print(f"  FAILED: Expected return 1 for new field '{field}', got {result}")
-                    return False
+            result = write_node.hset(test_key, mapping=fields)
+            # Should return 3 (number of new fields added)
+            if result != 3:
+                print(f"  FAILED: Expected return 3 (3 new fields), got {result}")
+                return False
+            print(f"    HSET returned {result} (new fields)")
         except redis.RedisError as e:
             print(f"  FAILED: HSET failed - {e}")
             return False
@@ -104,6 +107,60 @@ class TestClusterHash(TestClusterBase):
                         return False
                 print(f"    Node {i}: OK (all fields match)")
             except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_hset_multiple_fields_mixed(self) -> bool:
+        """Test HSET with multiple fields where some exist and some don't."""
+        print("\nTest: HSET Multiple Fields Mixed (Existing + New)")
+        
+        test_key = "test_hash_multi_mixed"
+        
+        # First, set one field
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "existing_field", "existing_value")
+        
+        # Now set multiple fields including the existing one
+        # mapping = {"existing_field": "updated_value", "new_field1": "new1", "new_field2": "new2"}
+        # redis-py doesn't support NX/XX with mapping, so we use individual calls for this test
+        # But we can test the return value: should return 2 (2 new fields)
+        
+        print(f"  HSET '{test_key}' with existing + new fields...")
+        try:
+            # First update the existing field
+            result = write_node.hset(test_key, "existing_field", "updated_value")
+            if result != 0:
+                print(f"  FAILED: Expected return 0 for existing field update, got {result}")
+                return False
+            
+            # Then add new fields one by one to test return values
+            result = write_node.hset(test_key, "new_field1", "new1")
+            if result != 1:
+                print(f"  FAILED: Expected return 1 for new field, got {result}")
+                return False
+            
+            result = write_node.hset(test_key, "new_field2", "new2")
+            if result != 1:
+                print(f"  FAILED: Expected return 1 for new field, got {result}")
+                return False
+            
+            print(f"    Individual HSET calls succeeded with correct return values")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # Verify all values
+        print("  Verify all values from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                assert node.conn.hget(test_key, "existing_field") == "updated_value"
+                assert node.conn.hget(test_key, "new_field1") == "new1"
+                assert node.conn.hget(test_key, "new_field2") == "new2"
+                print(f"    Node {i}: OK")
+            except (redis.RedisError, AssertionError) as e:
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
@@ -155,6 +212,159 @@ class TestClusterHash(TestClusterBase):
             except redis.RedisError as e:
                 print(f"    Node {i}: FAILED - {e}")
                 return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_hset_nx_option(self) -> bool:
+        """Test HSET with NX option (only set if field does not exist)."""
+        print("\nTest: HSET with NX Option")
+        
+        test_key = "test_hash_nx"
+        test_field = "nx_field"
+        initial_value = "initial"
+        new_value = "new_value"
+        
+        # First set the field normally
+        write_node = self._get_random_node()
+        print(f"  Set field normally...")
+        write_node.hset(test_key, test_field, initial_value)
+        
+        # Try HSET with NX - should fail (return 0) because field exists
+        print(f"  HSET with NX on existing field...")
+        try:
+            # Execute raw command: HSET key field value NX
+            result = write_node.execute_command('HSET', test_key, test_field, new_value, 'NX')
+            if result != 0:
+                print(f"  FAILED: Expected return 0 (field exists), got {result}")
+                return False
+            print(f"    NX on existing field: returned 0 (correct)")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET NX failed - {e}")
+            return False
+        
+        # Verify value was NOT changed
+        value = write_node.hget(test_key, test_field)
+        if value != initial_value:
+            print(f"  FAILED: Value was changed despite NX! Expected '{initial_value}', got '{value}'")
+            return False
+        
+        # Try HSET with NX on a new field - should succeed
+        print(f"  HSET with NX on new field...")
+        new_field = "nx_new_field"
+        try:
+            result = write_node.execute_command('HSET', test_key, new_field, new_value, 'NX')
+            if result != 1:
+                print(f"  FAILED: Expected return 1 (new field), got {result}")
+                return False
+            print(f"    NX on new field: returned 1 (correct)")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET NX failed - {e}")
+            return False
+        
+        # Verify new field was set
+        value = write_node.hget(test_key, new_field)
+        if value != new_value:
+            print(f"  FAILED: New field was not set! Expected '{new_value}', got '{value}'")
+            return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_hset_xx_option(self) -> bool:
+        """Test HSET with XX option (only set if field exists)."""
+        print("\nTest: HSET with XX Option")
+        
+        test_key = "test_hash_xx"
+        test_field = "xx_field"
+        initial_value = "initial"
+        new_value = "updated"
+        
+        # First set the field normally
+        write_node = self._get_random_node()
+        print(f"  Set field normally...")
+        write_node.hset(test_key, test_field, initial_value)
+        
+        # Try HSET with XX on existing field - should succeed
+        print(f"  HSET with XX on existing field...")
+        try:
+            result = write_node.execute_command('HSET', test_key, test_field, new_value, 'XX')
+            if result != 1:
+                print(f"  FAILED: Expected return 1 (field updated), got {result}")
+                return False
+            print(f"    XX on existing field: returned 1 (correct)")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET XX failed - {e}")
+            return False
+        
+        # Verify value WAS changed
+        value = write_node.hget(test_key, test_field)
+        if value != new_value:
+            print(f"  FAILED: Value was not changed! Expected '{new_value}', got '{value}'")
+            return False
+        
+        # Try HSET with XX on a new field - should fail (return 0)
+        print(f"  HSET with XX on new field...")
+        new_field = "xx_new_field"
+        try:
+            result = write_node.execute_command('HSET', test_key, new_field, "value", 'XX')
+            if result != 0:
+                print(f"  FAILED: Expected return 0 (field doesn't exist), got {result}")
+                return False
+            print(f"    XX on new field: returned 0 (correct)")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET XX failed - {e}")
+            return False
+        
+        # Verify new field was NOT set
+        value = write_node.hget(test_key, new_field)
+        if value is not None:
+            print(f"  FAILED: New field was set despite XX! Got '{value}'")
+            return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_hset_nx_multiple_fields(self) -> bool:
+        """Test HSET with NX option and multiple fields."""
+        print("\nTest: HSET with NX Option and Multiple Fields")
+        
+        test_key = "test_hash_nx_multi"
+        
+        # Pre-populate one field
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "value1")
+        
+        # HSET with NX for multiple fields:
+        # field1 exists -> skip
+        # field2 new -> set
+        # field3 new -> set
+        print(f"  HSET NX with field1 (exists), field2 (new), field3 (new)...")
+        try:
+            # Execute: HSET key field1 v1 field2 v2 field3 v3 NX
+            result = write_node.execute_command('HSET', test_key, 'field1', 'new1', 'field2', 'v2', 'field3', 'v3', 'NX')
+            # Should return 1 because at least one field was set
+            if result != 1:
+                print(f"  FAILED: Expected return 1 (at least one field set), got {result}")
+                return False
+            print(f"    Returned {result} (correct)")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET NX failed - {e}")
+            return False
+        
+        # Verify field1 was NOT changed
+        value = write_node.hget(test_key, 'field1')
+        if value != 'value1':
+            print(f"  FAILED: field1 was changed! Expected 'value1', got '{value}'")
+            return False
+        
+        # Verify field2 and field3 were set
+        if write_node.hget(test_key, 'field2') != 'v2':
+            print(f"  FAILED: field2 was not set correctly")
+            return False
+        if write_node.hget(test_key, 'field3') != 'v3':
+            print(f"  FAILED: field3 was not set correctly")
+            return False
         
         print("  PASSED")
         return True
@@ -275,7 +485,11 @@ class TestClusterHash(TestClusterBase):
         tests = [
             self.test_hset_and_hget,
             self.test_hset_multiple_fields,
+            self.test_hset_multiple_fields_mixed,
             self.test_hset_update_existing,
+            self.test_hset_nx_option,
+            self.test_hset_xx_option,
+            self.test_hset_nx_multiple_fields,
             self.test_hget_nonexistent,
             self.test_chaos_hset_hget,
         ]

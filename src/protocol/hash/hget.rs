@@ -4,7 +4,7 @@
 //! Returns the value associated with field in the hash stored at key.
 //! Returns nil if key or field does not exist.
 
-use crate::encoding::{HashFieldValue, HashMetadata, NO_EXPIRATION};
+use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;

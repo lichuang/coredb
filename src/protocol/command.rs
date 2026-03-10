@@ -1,5 +1,5 @@
 use crate::protocol::connection::PingCommand;
-use crate::protocol::hash::{HDelCommand, HGetCommand, HSetCommand};
+use crate::protocol::hash::{HDelCommand, HExistsCommand, HGetCommand, HSetCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{GetCommand, SetCommand};
 use crate::server::Server;
@@ -44,6 +44,7 @@ impl CommandFactory {
 
     // Register hash commands
     factory.register("HDEL", HDelCommand);
+    factory.register("HEXISTS", HExistsCommand);
     factory.register("HGET", HGetCommand);
     factory.register("HSET", HSetCommand);
 
@@ -87,6 +88,7 @@ mod tests {
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("SET"));
     assert!(factory.commands.contains_key("HDEL"));
+    assert!(factory.commands.contains_key("HEXISTS"));
     assert!(factory.commands.contains_key("HGET"));
     assert!(factory.commands.contains_key("HSET"));
   }

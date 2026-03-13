@@ -63,22 +63,26 @@ impl HSetCommand {
     let mut option = HSetOption::None;
 
     // Check if last item is NX or XX
+    #[allow(clippy::collapsible_if)]
     if items.len() >= 5 {
       if let Some(opt_str) = Self::extract_string(&items[items.len() - 1]) {
-        let opt_upper = opt_str.to_uppercase();
-        if opt_upper == "NX" {
-          option = HSetOption::NX;
-          end_idx = items.len() - 1;
-        } else if opt_upper == "XX" {
-          option = HSetOption::XX;
-          end_idx = items.len() - 1;
+        match opt_str.to_uppercase().as_str() {
+          "NX" => {
+            option = HSetOption::NX;
+            end_idx = items.len() - 1;
+          }
+          "XX" => {
+            option = HSetOption::XX;
+            end_idx = items.len() - 1;
+          }
+          _ => {}
         }
       }
     }
 
     // Parse field-value pairs from items[2..end_idx]
     let field_count = end_idx - 2; // items[2] onwards
-    if field_count % 2 != 0 {
+    if !field_count.is_multiple_of(2) {
       return Err(Value::error(
         "ERR wrong number of arguments for 'hset' command",
       ));
@@ -158,14 +162,11 @@ impl Command for HSetCommand {
 
     // Process each field-value pair
     for (field, value_data) in args.fields {
-      let sub_key = HashFieldValue::build_sub_key(args.key.as_bytes(), version, &field);
-      let sub_key_str = String::from_utf8_lossy(&sub_key).to_string();
+      // Use hex-encoded sub_key for storage (guaranteed valid UTF-8)
+      let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &field);
 
       // Check if field exists
-      let field_exists = match server.get(&sub_key_str).await {
-        Ok(Some(_)) => true,
-        _ => false,
-      };
+      let field_exists = matches!(server.get(&sub_key_str).await, Ok(Some(_)));
 
       // Apply NX/XX conditions
       match args.option {

@@ -57,8 +57,7 @@ impl Command for HGetCommand {
 
     // Get field value
     let version = metadata.version;
-    let sub_key = HashFieldValue::build_sub_key(key.as_bytes(), version, &field);
-    let sub_key_str = String::from_utf8_lossy(&sub_key).to_string();
+    let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, &field);
 
     match server.get(&sub_key_str).await {
       Ok(Some(raw_value)) => {

@@ -24,8 +24,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Raft dependencies
-rockraft = { version = "0.1.0" }
+rockraft = { version = "0.1.3" }
 toml = "0.8"
+base64 = "0.22.1"
+hex = "0.4.3"
 
 [dev-dependencies]
 # Testing dependencies will be added here

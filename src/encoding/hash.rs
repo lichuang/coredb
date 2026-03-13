@@ -61,10 +61,11 @@ impl HashMetadata {
   }
 
   /// Create a new HashMetadata with expiration timestamp (in milliseconds)
+  #[allow(dead_code)]
   pub fn with_expiration(expires_at: u64) -> Self {
     Self {
       flags: CURRENT_VERSION,
-      expires_at: expires_at,
+      expires_at,
       version: Self::generate_version(),
       size: 0,
     }
@@ -99,6 +100,7 @@ impl HashMetadata {
   }
 
   /// Check if this hash has an expiration time set
+  #[allow(dead_code)]
   pub fn has_expiration(&self) -> bool {
     self.expires_at != NO_EXPIRATION
   }
@@ -116,11 +118,13 @@ impl HashMetadata {
   }
 
   /// Set expiration timestamp
+  #[allow(dead_code)]
   pub fn set_expiration(&mut self, expires_at: u64) {
     self.expires_at = expires_at;
   }
 
   /// Clear expiration (make it never expire)
+  #[allow(dead_code)]
   pub fn clear_expiration(&mut self) {
     self.expires_at = NO_EXPIRATION;
   }
@@ -214,6 +218,21 @@ impl HashFieldValue {
     sub_key.extend_from_slice(&version.to_be_bytes());
     sub_key.extend_from_slice(field);
     sub_key
+  }
+
+  /// Build the sub-key as hex string for storage (guaranteed valid UTF-8)
+  /// This is used for storing in String-based KV stores like rockraft
+  pub fn build_sub_key_hex(key: &[u8], version: u64, field: &[u8]) -> String {
+    let sub_key = Self::build_sub_key(key, version, field);
+    hex::encode(&sub_key)
+  }
+
+  /// Parse a hex-encoded sub-key into its components: (key, version, field)
+  #[allow(dead_code)]
+  pub fn parse_sub_key_hex(hex_str: &str) -> Option<(Vec<u8>, u64, Vec<u8>)> {
+    let sub_key = hex::decode(hex_str).ok()?;
+    let (key, version, field) = Self::parse_sub_key(&sub_key)?;
+    Some((key.to_vec(), version, field.to_vec()))
   }
 
   /// Parse a sub-key into its components: (key, version, field)

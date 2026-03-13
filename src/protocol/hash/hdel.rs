@@ -35,8 +35,8 @@ impl Command for HDelCommand {
 
     // Parse fields to delete
     let mut fields = Vec::with_capacity(items.len() - 2);
-    for i in 2..items.len() {
-      let field = match &items[i] {
+    for item in items.iter().skip(2) {
+      let field = match item {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
         _ => return Value::error("ERR invalid field"),
@@ -71,8 +71,7 @@ impl Command for HDelCommand {
 
     // Delete each field
     for field in fields {
-      let sub_key = HashFieldValue::build_sub_key(key.as_bytes(), version, &field);
-      let sub_key_str = String::from_utf8_lossy(&sub_key).to_string();
+      let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, &field);
 
       // Check if field exists before deleting
       match server.get(&sub_key_str).await {

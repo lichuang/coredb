@@ -97,6 +97,18 @@ impl Server {
     }
   }
 
+  /// Scan keys by prefix from the state machine (forwarded to leader)
+  /// Returns a vector of (key, value) tuples where keys start with the given prefix
+  pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    let req = rockraft::raft::types::ScanPrefixReq {
+      prefix: prefix.to_vec(),
+    };
+    match self.raft_node.scan_prefix(req).await {
+      Ok(results) => Ok(results),
+      Err(e) => Err(format!("Failed to scan prefix: {}", e)),
+    }
+  }
+
   /// Process a RESP command and return the response
   async fn process_command(&self, value: Value) -> Value {
     self.cmd_factory.execute(value, self).await
@@ -123,28 +135,20 @@ impl Server {
 
           // Try to parse and process complete commands
           let mut processed = 0;
-          loop {
-            match Parser::parse(&pending[processed..]) {
-              Some((value, consumed)) => {
-                processed += consumed;
+          while let Some((value, consumed)) = Parser::parse(&pending[processed..]) {
+            processed += consumed;
 
-                // Log the parsed command
-                info!("Received command from {}: {:?}", peer_addr, value);
+            // Log the parsed command
+            info!("Received command from {}: {:?}", peer_addr, value);
 
-                // Process the command and get response
-                let response = self.process_command(value).await;
-                let encoded = response.encode();
+            // Process the command and get response
+            let response = self.process_command(value).await;
+            let encoded = response.encode();
 
-                // Send response
-                if let Err(e) = stream.write_all(&encoded).await {
-                  warn!("Failed to write response to {}: {}", peer_addr, e);
-                  break;
-                }
-              }
-              None => {
-                // No complete command available
-                break;
-              }
+            // Send response
+            if let Err(e) = stream.write_all(&encoded).await {
+              warn!("Failed to write response to {}: {}", peer_addr, e);
+              break;
             }
           }
 

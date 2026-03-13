@@ -59,7 +59,7 @@ impl StringValue {
   pub fn with_expiration(data: impl Into<Vec<u8>>, expires_at: u64) -> Self {
     Self {
       flags: CURRENT_VERSION,
-      expires_at: expires_at,
+      expires_at,
       data: data.into(),
     }
   }

@@ -204,11 +204,22 @@ cd tests
    factory.register("XXX", XxxCommand);
    ```
 
-5. **Add tests**:
-   - Unit tests for params parsing
-   - Integration tests for functionality
+5. **Add Unit Tests** (REQUIRED):
+   - Test params parsing with valid inputs
+   - Test params parsing with invalid inputs (error cases)
+   - Test each option/flag combination
+   - Place tests in `#[cfg(test)]` module at the bottom of the command file
 
-6. **Update README.md**: Mark command as ✅ in the commands table
+6. **Add Integration Tests** (REQUIRED):
+   - Create test methods in `tests/test_cluster_<type>.py`
+   - Test basic functionality (e.g., SET/GET for string commands)
+   - Test edge cases (empty values, large values, special characters)
+   - Test error handling (wrong args, invalid inputs)
+   - Run `python run_all_tests.py` to verify all tests pass
+
+7. **Update README.md**: Mark command as ✅ in the commands table
+
+**⚠️ IMPORTANT: Every new command MUST include both unit tests AND integration tests! Tests are not optional!**
 
 ## Configuration
 
@@ -232,6 +243,27 @@ max_open_files = 10000
 level = "info"
 ```
 
+## Code Quality Requirements
+
+**All code changes MUST pass the following checks before submission:**
+
+### Formatting Check
+```bash
+# Check code formatting
+cargo fmt --all -- --check
+
+# Auto-fix formatting issues
+cargo fmt --all
+```
+
+### Clippy Check
+```bash
+# Run clippy (treat warnings as errors)
+cargo clippy --all-features -- -D warnings
+```
+
+**⚠️ IMPORTANT: After every code change, ensure both commands pass with ZERO errors and ZERO warnings!**
+
 ## Build & Run
 
 ```bash
@@ -240,12 +272,6 @@ cargo build
 
 # Run single node
 cargo run -- --conf {config file}
-
-# Format code
-cargo fmt --all -- --check
-
-# Run clippy
-cargo clippy --all-features -- -D warnings
 ```
 
 ## Important Notes

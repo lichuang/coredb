@@ -141,7 +141,7 @@ print(r.get('key'))
 | `HDEL key field [field ...]` | Delete hash field(s) | ✅ |
 | `HEXISTS key field` | Check if field exists | ✅ |
 | `HGETALL key` | Get all fields and values | ✅ |
-| `HKEYS key` | Get all field names | ❌ |
+| `HKEYS key` | Get all field names | ✅ |
 | `HLEN key` | Get number of fields | ❌ |
 | `HMGET key field [field ...]` | Get multiple field values | ❌ |
 | `HSETNX key field value` | Set field if not exists | ❌ |

@@ -551,6 +551,154 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hkeys_basic(self) -> bool:
+        """Test basic HKEYS operation."""
+        print("\nTest: HKEYS Basic")
+        
+        test_key = "test_hash_hkeys"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields using HSET
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' with multiple fields...")
+        try:
+            result = write_node.hset(test_key, mapping=fields)
+            if result != 3:
+                print(f"  FAILED: Expected return 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # HKEYS from all nodes
+        print("  HKEYS from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.hkeys(test_key)
+                # redis-py returns a list
+                if not isinstance(result, list):
+                    print(f"    Node {i}: FAILED (expected list, got {type(result).__name__})")
+                    return False
+                
+                # Check all fields are present (order may vary)
+                result_set = set(result)
+                expected_set = set(fields.keys())
+                if result_set != expected_set:
+                    print(f"    Node {i}: FAILED (expected {expected_set}, got {result_set})")
+                    return False
+                
+                # Check no extra fields
+                if len(result) != len(fields):
+                    print(f"    Node {i}: FAILED (expected {len(fields)} fields, got {len(result)})")
+                    return False
+                
+                print(f"    Node {i}: OK (all {len(fields)} fields match)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hkeys_empty_hash(self) -> bool:
+        """Test HKEYS on non-existent key returns empty list."""
+        print("\nTest: HKEYS Non-existent Key")
+        
+        test_key = "nonexistent_hash_for_hkeys"
+        
+        node = self._get_random_node()
+        try:
+            result = node.hkeys(test_key)
+            if result != []:
+                print(f"  FAILED: Expected empty list, got {result}")
+                return False
+            print("  HKEYS on non-existent key returned empty list: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HKEYS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hkeys_after_hdel(self) -> bool:
+        """Test HKEYS after deleting some fields."""
+        print("\nTest: HKEYS After HDEL")
+        
+        test_key = "test_hash_hkeys_after_hdel"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, mapping=fields)
+        
+        # Delete one field
+        print("  HDEL field2...")
+        try:
+            result = write_node.hdel(test_key, "field2")
+            if result != 1:
+                print(f"  FAILED: HDEL expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HDEL failed - {e}")
+            return False
+        
+        # HKEYS should return remaining fields
+        print("  HKEYS after HDEL...")
+        try:
+            result = write_node.hkeys(test_key)
+            expected = {"field1", "field3"}
+            result_set = set(result)
+            if result_set != expected:
+                print(f"  FAILED: Expected {expected}, got {result_set}")
+                return False
+            print(f"  HKEYS returned {len(result)} fields: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HKEYS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hkeys_after_hset_update(self) -> bool:
+        """Test HKEYS returns same fields after HSET update."""
+        print("\nTest: HKEYS After HSET Update")
+        
+        test_key = "test_hash_hkeys_update"
+        
+        # Set initial fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "initial_value")
+        write_node.hset(test_key, "field2", "value2")
+        
+        # Update one field
+        print("  Update field1 with new value...")
+        write_node.hset(test_key, "field1", "updated_value")
+        
+        # HKEYS should return same fields
+        print("  HKEYS after update...")
+        try:
+            result = write_node.hkeys(test_key)
+            result_set = set(result)
+            expected_set = {"field1", "field2"}
+            if result_set != expected_set:
+                print(f"  FAILED: expected {expected_set}, got {result_set}")
+                return False
+            print("  HKEYS returned correct fields: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HKEYS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -641,6 +789,10 @@ class TestClusterHash(TestClusterBase):
             self.test_hgetall_empty_hash,
             self.test_hgetall_after_hdel,
             self.test_hgetall_after_hset_update,
+            self.test_hkeys_basic,
+            self.test_hkeys_empty_hash,
+            self.test_hkeys_after_hdel,
+            self.test_hkeys_after_hset_update,
             self.test_chaos_hset_hget,
         ]
         

@@ -699,6 +699,136 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hlen_basic(self) -> bool:
+        """Test basic HLEN operation."""
+        print("\nTest: HLEN Basic")
+        
+        test_key = "test_hash_hlen"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields using HSET
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' with {len(fields)} fields...")
+        try:
+            result = write_node.hset(test_key, mapping=fields)
+            if result != 3:
+                print(f"  FAILED: Expected return 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # HLEN from all nodes
+        print("  HLEN from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.hlen(test_key)
+                if result != len(fields):
+                    print(f"    Node {i}: FAILED (expected {len(fields)}, got {result})")
+                    return False
+                print(f"    Node {i}: OK (got {result})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hlen_empty_hash(self) -> bool:
+        """Test HLEN on non-existent key returns 0."""
+        print("\nTest: HLEN Non-existent Key")
+        
+        test_key = "nonexistent_hash_for_hlen"
+        
+        node = self._get_random_node()
+        try:
+            result = node.hlen(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+            print("  HLEN on non-existent key returned 0: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HLEN failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hlen_after_hdel(self) -> bool:
+        """Test HLEN after deleting some fields."""
+        print("\nTest: HLEN After HDEL")
+        
+        test_key = "test_hash_hlen_after_hdel"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, mapping=fields)
+        
+        # Delete one field
+        print("  HDEL field2...")
+        try:
+            result = write_node.hdel(test_key, "field2")
+            if result != 1:
+                print(f"  FAILED: HDEL expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HDEL failed - {e}")
+            return False
+        
+        # HLEN should return 2
+        print("  HLEN after HDEL...")
+        try:
+            result = write_node.hlen(test_key)
+            if result != 2:
+                print(f"  FAILED: Expected 2, got {result}")
+                return False
+            print(f"  HLEN returned {result}: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HLEN failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hlen_after_hset_update(self) -> bool:
+        """Test HLEN returns same count after HSET update."""
+        print("\nTest: HLEN After HSET Update")
+        
+        test_key = "test_hash_hlen_update"
+        
+        # Set initial fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "initial_value")
+        write_node.hset(test_key, "field2", "value2")
+        
+        # Update one field (should not change count)
+        print("  Update field1 with new value...")
+        write_node.hset(test_key, "field1", "updated_value")
+        
+        # HLEN should still return 2
+        print("  HLEN after update...")
+        try:
+            result = write_node.hlen(test_key)
+            if result != 2:
+                print(f"  FAILED: expected 2, got {result}")
+                return False
+            print("  HLEN returned correct count: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HLEN failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -793,6 +923,10 @@ class TestClusterHash(TestClusterBase):
             self.test_hkeys_empty_hash,
             self.test_hkeys_after_hdel,
             self.test_hkeys_after_hset_update,
+            self.test_hlen_basic,
+            self.test_hlen_empty_hash,
+            self.test_hlen_after_hdel,
+            self.test_hlen_after_hset_update,
             self.test_chaos_hset_hget,
         ]
         

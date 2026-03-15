@@ -829,6 +829,145 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hmget_basic(self) -> bool:
+        """Test basic HMGET operation with multiple fields."""
+        print("\nTest: HMGET Basic")
+        
+        test_key = "test_hash_hmget"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields using HSET
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' with multiple fields...")
+        try:
+            result = write_node.hset(test_key, mapping=fields)
+            if result != 3:
+                print(f"  FAILED: Expected return 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # HMGET from all nodes
+        print("  HMGET field1, field2, field3 from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.hmget(test_key, ["field1", "field2", "field3"])
+                # redis-py returns a list
+                if not isinstance(result, list):
+                    print(f"    Node {i}: FAILED (expected list, got {type(result).__name__})")
+                    return False
+                
+                # Check all values are correct
+                expected = ["value1", "value2", "value3"]
+                if result != expected:
+                    print(f"    Node {i}: FAILED (expected {expected}, got {result})")
+                    return False
+                
+                print(f"    Node {i}: OK (all values match)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hmget_partial_fields(self) -> bool:
+        """Test HMGET with some non-existent fields."""
+        print("\nTest: HMGET Partial Fields")
+        
+        test_key = "test_hash_hmget_partial"
+        
+        # Set only some fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "value1")
+        write_node.hset(test_key, "field3", "value3")
+        
+        # HMGET including non-existent field2
+        print("  HMGET field1, field2, field3 (field2 does not exist)...")
+        try:
+            result = write_node.hmget(test_key, ["field1", "field2", "field3"])
+            expected = ["value1", None, "value3"]
+            if result != expected:
+                print(f"  FAILED: Expected {expected}, got {result}")
+                return False
+            print(f"  OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HMGET failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hmget_nonexistent_key(self) -> bool:
+        """Test HMGET on non-existent key returns array of nils."""
+        print("\nTest: HMGET Non-existent Key")
+        
+        test_key = "nonexistent_hash_for_hmget"
+        
+        node = self._get_random_node()
+        try:
+            result = node.hmget(test_key, ["field1", "field2", "field3"])
+            expected = [None, None, None]
+            if result != expected:
+                print(f"  FAILED: Expected {expected}, got {result}")
+                return False
+            print("  HMGET on non-existent key returned [nil, nil, nil]: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HMGET failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hmget_single_field(self) -> bool:
+        """Test HMGET with single field (should work like HGET)."""
+        print("\nTest: HMGET Single Field")
+        
+        test_key = "test_hash_hmget_single"
+        
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "value1")
+        
+        print("  HMGET field1 (single field)...")
+        try:
+            result = write_node.hmget(test_key, ["field1"])
+            expected = ["value1"]
+            if result != expected:
+                print(f"  FAILED: Expected {expected}, got {result}")
+                return False
+            print(f"  OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HMGET failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hmget_empty_fields(self) -> bool:
+        """Test HMGET with no fields should return error."""
+        print("\nTest: HMGET No Fields")
+        
+        test_key = "test_hash_hmget_empty"
+        
+        node = self._get_random_node()
+        print("  HMGET with no fields...")
+        try:
+            # Execute raw command: HMGET key (no fields)
+            result = node.execute_command('HMGET', test_key)
+            print(f"  FAILED: Expected error, got {result}")
+            return False
+        except redis.RedisError as e:
+            # Should get an error about wrong number of arguments
+            print(f"  OK: Got expected error - {e}")
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -927,6 +1066,11 @@ class TestClusterHash(TestClusterBase):
             self.test_hlen_empty_hash,
             self.test_hlen_after_hdel,
             self.test_hlen_after_hset_update,
+            self.test_hmget_basic,
+            self.test_hmget_partial_fields,
+            self.test_hmget_nonexistent_key,
+            self.test_hmget_single_field,
+            self.test_hmget_empty_fields,
             self.test_chaos_hset_hget,
         ]
         

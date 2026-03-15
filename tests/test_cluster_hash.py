@@ -968,6 +968,159 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hexists_basic(self) -> bool:
+        """Test basic HEXISTS operation."""
+        print("\nTest: HEXISTS Basic")
+        
+        test_key = "test_hash_hexists"
+        test_field = "field1"
+        test_value = "value1"
+        
+        # Set a field
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' '{test_field}' = '{test_value}'...")
+        try:
+            result = write_node.hset(test_key, test_field, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected return 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # HEXISTS should return 1 for existing field
+        print("  HEXISTS from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.hexists(test_key, test_field)
+                if result != 1:
+                    print(f"    Node {i}: FAILED (expected 1, got {result})")
+                    return False
+                print(f"    Node {i}: OK (field exists)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hexists_nonexistent_field(self) -> bool:
+        """Test HEXISTS on non-existent field returns 0."""
+        print("\nTest: HEXISTS Non-existent Field")
+        
+        test_key = "test_hash_hexists_no_field"
+        
+        # Create a hash with one field
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "existing_field", "value")
+        
+        # HEXISTS on non-existent field should return 0
+        print("  HEXISTS on non-existent field...")
+        try:
+            result = write_node.hexists(test_key, "nonexistent_field")
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+            print("  OK: HEXISTS returned 0 for non-existent field")
+        except redis.RedisError as e:
+            print(f"  FAILED: HEXISTS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hexists_nonexistent_key(self) -> bool:
+        """Test HEXISTS on non-existent key returns 0."""
+        print("\nTest: HEXISTS Non-existent Key")
+        
+        test_key = "nonexistent_hash_for_hexists"
+        
+        node = self._get_random_node()
+        try:
+            result = node.hexists(test_key, "field1")
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+            print("  OK: HEXISTS returned 0 for non-existent key")
+        except redis.RedisError as e:
+            print(f"  FAILED: HEXISTS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hexists_after_hdel(self) -> bool:
+        """Test HEXISTS returns 0 after field is deleted."""
+        print("\nTest: HEXISTS After HDEL")
+        
+        test_key = "test_hash_hexists_after_hdel"
+        test_field = "field_to_delete"
+        
+        # Set a field
+        write_node = self._get_random_node()
+        write_node.hset(test_key, test_field, "value")
+        
+        # Verify field exists
+        if write_node.hexists(test_key, test_field) != 1:
+            print("  FAILED: Field should exist before HDEL")
+            return False
+        
+        # Delete the field
+        print("  HDEL the field...")
+        try:
+            result = write_node.hdel(test_key, test_field)
+            if result != 1:
+                print(f"  FAILED: HDEL expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HDEL failed - {e}")
+            return False
+        
+        # HEXISTS should now return 0
+        print("  HEXISTS after HDEL...")
+        try:
+            result = write_node.hexists(test_key, test_field)
+            if result != 0:
+                print(f"  FAILED: Expected 0 after HDEL, got {result}")
+                return False
+            print("  OK: HEXISTS returned 0 after HDEL")
+        except redis.RedisError as e:
+            print(f"  FAILED: HEXISTS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hexists_after_hset_update(self) -> bool:
+        """Test HEXISTS still returns 1 after field is updated."""
+        print("\nTest: HEXISTS After HSET Update")
+        
+        test_key = "test_hash_hexists_update"
+        test_field = "field1"
+        
+        # Set initial value
+        write_node = self._get_random_node()
+        write_node.hset(test_key, test_field, "initial_value")
+        
+        # Update the field
+        print("  Update field with new value...")
+        write_node.hset(test_key, test_field, "updated_value")
+        
+        # HEXISTS should still return 1
+        print("  HEXISTS after update...")
+        try:
+            result = write_node.hexists(test_key, test_field)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+            print("  OK: HEXISTS returned 1 after update")
+        except redis.RedisError as e:
+            print(f"  FAILED: HEXISTS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -1066,6 +1219,11 @@ class TestClusterHash(TestClusterBase):
             self.test_hlen_empty_hash,
             self.test_hlen_after_hdel,
             self.test_hlen_after_hset_update,
+            self.test_hexists_basic,
+            self.test_hexists_nonexistent_field,
+            self.test_hexists_nonexistent_key,
+            self.test_hexists_after_hdel,
+            self.test_hexists_after_hset_update,
             self.test_hmget_basic,
             self.test_hmget_partial_fields,
             self.test_hmget_nonexistent_key,

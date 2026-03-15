@@ -1,5 +1,6 @@
 mod config;
 mod encoding;
+mod error;
 mod protocol;
 mod server;
 mod util;

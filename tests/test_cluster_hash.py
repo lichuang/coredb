@@ -1121,6 +1121,135 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hsetnx_new_field(self) -> bool:
+        """Test HSETNX on new field sets the value and returns 1."""
+        print("\nTest: HSETNX New Field")
+        
+        test_key = "test_hash_hsetnx_new"
+        test_field = "field1"
+        test_value = "value1"
+        
+        write_node = self._get_random_node()
+        print(f"  HSETNX '{test_key}' '{test_field}' = '{test_value}'...")
+        try:
+            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected return 1 (field set), got {result}")
+                return False
+            print(f"  OK: HSETNX returned 1")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSETNX failed - {e}")
+            return False
+        
+        # Verify the field was set
+        value = write_node.hget(test_key, test_field)
+        if value != test_value:
+            print(f"  FAILED: Field not set correctly, expected '{test_value}', got '{value}'")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hsetnx_existing_field(self) -> bool:
+        """Test HSETNX on existing field does not change value and returns 0."""
+        print("\nTest: HSETNX Existing Field")
+        
+        test_key = "test_hash_hsetnx_existing"
+        test_field = "field1"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the field
+        print(f"  HSET '{test_key}' '{test_field}' = '{initial_value}'...")
+        write_node.hset(test_key, test_field, initial_value)
+        
+        # Try HSETNX on existing field
+        print(f"  HSETNX on existing field with '{new_value}'...")
+        try:
+            result = write_node.execute_command('HSETNX', test_key, test_field, new_value)
+            if result != 0:
+                print(f"  FAILED: Expected return 0 (field exists), got {result}")
+                return False
+            print(f"  OK: HSETNX returned 0")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSETNX failed - {e}")
+            return False
+        
+        # Verify the field was NOT changed
+        value = write_node.hget(test_key, test_field)
+        if value != initial_value:
+            print(f"  FAILED: Value was changed despite HSETNX! Expected '{initial_value}', got '{value}'")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hsetnx_replication(self) -> bool:
+        """Test HSETNX replicates to all nodes."""
+        print("\nTest: HSETNX Replication")
+        
+        test_key = "test_hash_hsetnx_repl"
+        test_field = "field1"
+        test_value = "value1"
+        
+        write_node = self._get_random_node()
+        print(f"  HSETNX '{test_key}' '{test_field}' = '{test_value}' on random node...")
+        try:
+            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected return 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSETNX failed - {e}")
+            return False
+        
+        # Verify from all nodes
+        print("  Verify HGET from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.hget(test_key, test_field)
+                if value == test_value:
+                    print(f"    Node {i}: OK (got '{value}')")
+                else:
+                    print(f"    Node {i}: FAILED (expected '{test_value}', got '{value}')")
+                    return False
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hsetnx_empty_value(self) -> bool:
+        """Test HSETNX with empty value."""
+        print("\nTest: HSETNX Empty Value")
+        
+        test_key = "test_hash_hsetnx_empty"
+        test_field = "field1"
+        test_value = ""
+        
+        write_node = self._get_random_node()
+        print(f"  HSETNX '{test_key}' '{test_field}' = '' (empty)...")
+        try:
+            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected return 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSETNX failed - {e}")
+            return False
+        
+        # Verify the empty value was set
+        value = write_node.hget(test_key, test_field)
+        if value != test_value:
+            print(f"  FAILED: Expected empty string, got '{value}'")
+            return False
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -1224,6 +1353,10 @@ class TestClusterHash(TestClusterBase):
             self.test_hexists_nonexistent_key,
             self.test_hexists_after_hdel,
             self.test_hexists_after_hset_update,
+            self.test_hsetnx_new_field,
+            self.test_hsetnx_existing_field,
+            self.test_hsetnx_replication,
+            self.test_hsetnx_empty_value,
             self.test_hmget_basic,
             self.test_hmget_partial_fields,
             self.test_hmget_nonexistent_key,

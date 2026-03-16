@@ -1,7 +1,7 @@
 //! Redis hash commands module
 //!
 //! This module provides Redis hash commands including HSET, HGET, HDEL, HEXISTS, HGETALL, HKEYS,
-//! HLEN, and HMGET.
+//! HLEN, HMGET, and HSETNX.
 
 pub mod hdel;
 pub mod hexists;
@@ -11,6 +11,7 @@ pub mod hkeys;
 pub mod hlen;
 pub mod hmget;
 pub mod hset;
+pub mod hsetnx;
 
 pub use hdel::HDelCommand;
 pub use hexists::HExistsCommand;
@@ -20,3 +21,4 @@ pub use hkeys::HKeysCommand;
 pub use hlen::HLenCommand;
 pub use hmget::HMGetCommand;
 pub use hset::HSetCommand;
+pub use hsetnx::HSetNxCommand;

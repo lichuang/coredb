@@ -214,15 +214,58 @@ impl Command for SetCommand {
     };
     let serialized = string_value.serialize();
 
-    // TODO: Implement NX/XX mode logic
-    // TODO: Implement GET option to return previous value
+    // Check if key exists and get old value (for NX/XX/GET logic)
+    let existing_value = match server.get(&params.key).await {
+      Ok(Some(raw_value)) => {
+        match StringValue::deserialize(&raw_value) {
+          Ok(value) if !value.is_expired(now) => Some(value),
+          _ => None, // Expired or corrupted, treat as not exists
+        }
+      }
+      _ => None, // Not found or error, treat as not exists
+    };
 
-    // For now, just set the value (basic implementation)
+    // Apply NX/XX mode logic
+    match params.mode {
+      Some(SetMode::Nx) => {
+        // NX: Only set if key does not exist
+        if let Some(existing) = existing_value {
+          // Key exists, do not set
+          return if params.get {
+            // GET with NX: return current value without modification
+            Value::BulkString(Some(existing.data))
+          } else {
+            // Just return nil (nil bulk string)
+            Value::BulkString(None)
+          };
+        }
+      }
+      Some(SetMode::Xx) => {
+        // XX: Only set if key exists
+        if existing_value.is_none() {
+          // Key does not exist, do not set
+          return if params.get {
+            // GET with XX: return nil since key doesn't exist
+            Value::BulkString(None)
+          } else {
+            Value::BulkString(None)
+          };
+        }
+      }
+      None => {
+        // No mode restriction, always set
+      }
+    }
+
+    // Store the old value for GET option before we overwrite
+    let old_value_data = existing_value.as_ref().map(|v| v.data.clone());
+
+    // Set the new value
     match server.set(params.key, serialized).await {
       Ok(_) => {
         if params.get {
-          // TODO: Return previous value when GET option is implemented
-          Value::BulkString(None)
+          // Return the previous value (or nil if key didn't exist)
+          Value::BulkString(old_value_data)
         } else {
           Value::ok()
         }
@@ -396,6 +439,65 @@ mod tests {
     let items = vec![
       Value::BulkString(Some(b"SET".to_vec())),
       Value::BulkString(Some(b"key".to_vec())),
+    ];
+    assert!(SetParams::parse(&items).is_none());
+  }
+
+  #[test]
+  fn test_set_params_parse_multiple_options() {
+    // Test NX + GET + EX combination
+    let items = vec![
+      Value::BulkString(Some(b"SET".to_vec())),
+      Value::BulkString(Some(b"mykey".to_vec())),
+      Value::BulkString(Some(b"myvalue".to_vec())),
+      Value::BulkString(Some(b"GET".to_vec())),
+      Value::BulkString(Some(b"NX".to_vec())),
+      Value::BulkString(Some(b"EX".to_vec())),
+      Value::BulkString(Some(b"120".to_vec())),
+    ];
+    let params = SetParams::parse(&items).unwrap();
+    assert_eq!(params.mode, Some(SetMode::Nx));
+    assert_eq!(params.get, true);
+    assert_eq!(params.expiration, Some(Expiration::Ex(120)));
+
+    // Test XX + GET + PX combination
+    let items = vec![
+      Value::BulkString(Some(b"SET".to_vec())),
+      Value::BulkString(Some(b"mykey".to_vec())),
+      Value::BulkString(Some(b"myvalue".to_vec())),
+      Value::BulkString(Some(b"XX".to_vec())),
+      Value::BulkString(Some(b"GET".to_vec())),
+      Value::BulkString(Some(b"PX".to_vec())),
+      Value::BulkString(Some(b"5000".to_vec())),
+    ];
+    let params = SetParams::parse(&items).unwrap();
+    assert_eq!(params.mode, Some(SetMode::Xx));
+    assert_eq!(params.get, true);
+    assert_eq!(params.expiration, Some(Expiration::Px(5000)));
+  }
+
+  #[test]
+  fn test_set_params_parse_invalid_expiration_combination() {
+    // Cannot combine different expiration options
+    let items = vec![
+      Value::BulkString(Some(b"SET".to_vec())),
+      Value::BulkString(Some(b"mykey".to_vec())),
+      Value::BulkString(Some(b"myvalue".to_vec())),
+      Value::BulkString(Some(b"EX".to_vec())),
+      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"PX".to_vec())),
+      Value::BulkString(Some(b"1000".to_vec())),
+    ];
+    assert!(SetParams::parse(&items).is_none());
+
+    // Cannot combine EX with KEEPTTL
+    let items = vec![
+      Value::BulkString(Some(b"SET".to_vec())),
+      Value::BulkString(Some(b"mykey".to_vec())),
+      Value::BulkString(Some(b"myvalue".to_vec())),
+      Value::BulkString(Some(b"KEEPTTL".to_vec())),
+      Value::BulkString(Some(b"EX".to_vec())),
+      Value::BulkString(Some(b"60".to_vec())),
     ];
     assert!(SetParams::parse(&items).is_none());
   }

@@ -299,6 +299,345 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_set_nx_new_key(self) -> bool:
+        """Test SET with NX option on a new key (should succeed)."""
+        print("\nTest: SET with NX on new key")
+        
+        test_key = "nx_new_key"
+        test_value = "nx_value"
+        
+        write_node = self._get_random_node()
+        print(f"  SET '{test_key}' = '{test_value}' NX on a random node...")
+        try:
+            result = write_node.execute_command('SET', test_key, test_value, 'NX')
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET NX failed - {e}")
+            return False
+        
+        # Verify value was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set, got '{value}'")
+            return False
+        print("  Key set successfully: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_nx_existing_key(self) -> bool:
+        """Test SET with NX option on existing key (should fail)."""
+        print("\nTest: SET with NX on existing key")
+        
+        test_key = "nx_existing_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # Try SET NX on existing key
+        print(f"  SET '{test_key}' = '{new_value}' NX...")
+        try:
+            result = write_node.execute_command('SET', test_key, new_value, 'NX')
+            if result is not None:
+                print(f"  FAILED: Expected None (nil), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET NX failed - {e}")
+            return False
+        
+        # Verify value was NOT changed
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Value was changed to '{value}', expected '{initial_value}'")
+            return False
+        print("  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_xx_existing_key(self) -> bool:
+        """Test SET with XX option on existing key (should succeed)."""
+        print("\nTest: SET with XX on existing key")
+        
+        test_key = "xx_existing_key"
+        initial_value = "initial_value"
+        new_value = "xx_new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # SET XX on existing key
+        print(f"  SET '{test_key}' = '{new_value}' XX...")
+        try:
+            result = write_node.execute_command('SET', test_key, new_value, 'XX')
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET XX failed - {e}")
+            return False
+        
+        # Verify value WAS changed
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Value not changed, got '{value}', expected '{new_value}'")
+            return False
+        print("  Value changed: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_xx_new_key(self) -> bool:
+        """Test SET with XX option on non-existent key (should fail)."""
+        print("\nTest: SET with XX on non-existent key")
+        
+        test_key = "xx_new_key"
+        test_value = "xx_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SET XX on non-existent key
+        print(f"  SET '{test_key}' = '{test_value}' XX...")
+        try:
+            result = write_node.execute_command('SET', test_key, test_value, 'XX')
+            if result is not None:
+                print(f"  FAILED: Expected None (nil), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET XX failed - {e}")
+            return False
+        
+        # Verify key was NOT created
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key was created with value '{value}'")
+            return False
+        print("  Key not created: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_get_new_key(self) -> bool:
+        """Test SET with GET option on new key (should return nil)."""
+        print("\nTest: SET with GET on new key")
+        
+        test_key = "get_new_key"
+        test_value = "get_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SET GET on new key
+        print(f"  SET '{test_key}' = '{test_value}' GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, test_value, 'GET')
+            # Should return nil since key didn't exist
+            if result is not None:
+                print(f"  FAILED: Expected None, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET GET failed - {e}")
+            return False
+        
+        # Verify key was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set, got '{value}'")
+            return False
+        print("  Key set, previous value was nil: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_get_existing_key(self) -> bool:
+        """Test SET with GET option on existing key (should return old value)."""
+        print("\nTest: SET with GET on existing key")
+        
+        test_key = "get_existing_key"
+        initial_value = "initial_value"
+        new_value = "get_new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # SET GET on existing key
+        print(f"  SET '{test_key}' = '{new_value}' GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, new_value, 'GET')
+            if result != initial_value:
+                print(f"  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET GET failed - {e}")
+            return False
+        
+        # Verify value was updated
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Key not updated, got '{value}', expected '{new_value}'")
+            return False
+        print(f"  Previous value '{result}' returned, key updated: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_nx_get_new_key(self) -> bool:
+        """Test SET with NX GET on new key (should set and return nil)."""
+        print("\nTest: SET with NX GET on new key")
+        
+        test_key = "nx_get_new_key"
+        test_value = "nx_get_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SET NX GET on new key
+        print(f"  SET '{test_key}' = '{test_value}' NX GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, test_value, 'NX', 'GET')
+            # Should return nil since key didn't exist
+            if result is not None:
+                print(f"  FAILED: Expected None, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET NX GET failed - {e}")
+            return False
+        
+        # Verify key was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set, got '{value}'")
+            return False
+        print("  Key set, previous value was nil: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_nx_get_existing_key(self) -> bool:
+        """Test SET with NX GET on existing key (should return current value, not set)."""
+        print("\nTest: SET with NX GET on existing key")
+        
+        test_key = "nx_get_existing_key"
+        initial_value = "initial_value"
+        new_value = "nx_get_new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # SET NX GET on existing key
+        print(f"  SET '{test_key}' = '{new_value}' NX GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, new_value, 'NX', 'GET')
+            # Should return current value since key exists (and not set new value)
+            if result != initial_value:
+                print(f"  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET NX GET failed - {e}")
+            return False
+        
+        # Verify value was NOT changed
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Value was changed to '{value}', expected '{initial_value}'")
+            return False
+        print(f"  Current value '{result}' returned, key unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_xx_get_existing_key(self) -> bool:
+        """Test SET with XX GET on existing key (should set and return old value)."""
+        print("\nTest: SET with XX GET on existing key")
+        
+        test_key = "xx_get_existing_key"
+        initial_value = "initial_value"
+        new_value = "xx_get_new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # SET XX GET on existing key
+        print(f"  SET '{test_key}' = '{new_value}' XX GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, new_value, 'XX', 'GET')
+            if result != initial_value:
+                print(f"  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET XX GET failed - {e}")
+            return False
+        
+        # Verify value was updated
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Key not updated, got '{value}', expected '{new_value}'")
+            return False
+        print(f"  Previous value '{result}' returned, key updated: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_set_xx_get_new_key(self) -> bool:
+        """Test SET with XX GET on non-existent key (should return nil, not set)."""
+        print("\nTest: SET with XX GET on non-existent key")
+        
+        test_key = "xx_get_new_key"
+        test_value = "xx_get_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SET XX GET on non-existent key
+        print(f"  SET '{test_key}' = '{test_value}' XX GET...")
+        try:
+            result = write_node.execute_command('SET', test_key, test_value, 'XX', 'GET')
+            # Should return nil since key doesn't exist (and not set)
+            if result is not None:
+                print(f"  FAILED: Expected None, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET XX GET failed - {e}")
+            return False
+        
+        # Verify key was NOT created
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key was created with value '{value}'")
+            return False
+        print("  Key not created: OK")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -375,6 +714,16 @@ class TestClusterString(TestClusterBase):
             self.test_set_and_get,
             self.test_set_with_expiration,
             self.test_set_with_keepttl,
+            self.test_set_nx_new_key,
+            self.test_set_nx_existing_key,
+            self.test_set_xx_existing_key,
+            self.test_set_xx_new_key,
+            self.test_set_get_new_key,
+            self.test_set_get_existing_key,
+            self.test_set_nx_get_new_key,
+            self.test_set_nx_get_existing_key,
+            self.test_set_xx_get_existing_key,
+            self.test_set_xx_get_new_key,
             self.test_restart_persistence,
             self.test_chaos_set_get,  # Chaos test enabled
         ]

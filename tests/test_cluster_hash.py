@@ -1250,6 +1250,154 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hvals_basic(self) -> bool:
+        """Test basic HVALS operation."""
+        print("\nTest: HVALS Basic")
+        
+        test_key = "test_hash_hvals"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields using HSET
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' with multiple fields...")
+        try:
+            result = write_node.hset(test_key, mapping=fields)
+            if result != 3:
+                print(f"  FAILED: Expected return 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # HVALS from all nodes
+        print("  HVALS from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.hvals(test_key)
+                # redis-py returns a list
+                if not isinstance(result, list):
+                    print(f"    Node {i}: FAILED (expected list, got {type(result).__name__})")
+                    return False
+                
+                # Check all values are present (order may vary)
+                result_set = set(result)
+                expected_set = set(fields.values())
+                if result_set != expected_set:
+                    print(f"    Node {i}: FAILED (expected {expected_set}, got {result_set})")
+                    return False
+                
+                # Check no extra values
+                if len(result) != len(fields):
+                    print(f"    Node {i}: FAILED (expected {len(fields)} values, got {len(result)})")
+                    return False
+                
+                print(f"    Node {i}: OK (all {len(fields)} values match)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hvals_empty_hash(self) -> bool:
+        """Test HVALS on non-existent key returns empty list."""
+        print("\nTest: HVALS Non-existent Key")
+        
+        test_key = "nonexistent_hash_for_hvals"
+        
+        node = self._get_random_node()
+        try:
+            result = node.hvals(test_key)
+            if result != []:
+                print(f"  FAILED: Expected empty list, got {result}")
+                return False
+            print("  HVALS on non-existent key returned empty list: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HVALS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hvals_after_hdel(self) -> bool:
+        """Test HVALS after deleting some fields."""
+        print("\nTest: HVALS After HDEL")
+        
+        test_key = "test_hash_hvals_after_hdel"
+        fields = {
+            "field1": "value1",
+            "field2": "value2",
+            "field3": "value3"
+        }
+        
+        # Set multiple fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, mapping=fields)
+        
+        # Delete one field
+        print("  HDEL field2...")
+        try:
+            result = write_node.hdel(test_key, "field2")
+            if result != 1:
+                print(f"  FAILED: HDEL expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: HDEL failed - {e}")
+            return False
+        
+        # HVALS should return remaining values
+        print("  HVALS after HDEL...")
+        try:
+            result = write_node.hvals(test_key)
+            expected = {"value1", "value3"}
+            result_set = set(result)
+            if result_set != expected:
+                print(f"  FAILED: Expected {expected}, got {result_set}")
+                return False
+            print(f"  HVALS returned {len(result)} values: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HVALS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hvals_after_hset_update(self) -> bool:
+        """Test HVALS returns updated values after HSET update."""
+        print("\nTest: HVALS After HSET Update")
+        
+        test_key = "test_hash_hvals_update"
+        
+        # Set initial fields
+        write_node = self._get_random_node()
+        write_node.hset(test_key, "field1", "initial_value")
+        write_node.hset(test_key, "field2", "value2")
+        
+        # Update one field
+        print("  Update field1 with new value...")
+        write_node.hset(test_key, "field1", "updated_value")
+        
+        # HVALS should return updated values
+        print("  HVALS after update...")
+        try:
+            result = write_node.hvals(test_key)
+            result_set = set(result)
+            expected_set = {"updated_value", "value2"}
+            if result_set != expected_set:
+                print(f"  FAILED: expected {expected_set}, got {result_set}")
+                return False
+            print("  HVALS returned correct values: OK")
+        except redis.RedisError as e:
+            print(f"  FAILED: HVALS failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
     
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
@@ -1357,6 +1505,10 @@ class TestClusterHash(TestClusterBase):
             self.test_hsetnx_existing_field,
             self.test_hsetnx_replication,
             self.test_hsetnx_empty_value,
+            self.test_hvals_basic,
+            self.test_hvals_empty_hash,
+            self.test_hvals_after_hdel,
+            self.test_hvals_after_hset_update,
             self.test_hmget_basic,
             self.test_hmget_partial_fields,
             self.test_hmget_nonexistent_key,

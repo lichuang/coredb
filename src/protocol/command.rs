@@ -4,7 +4,7 @@ use crate::protocol::hash::{
   HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
 };
 use crate::protocol::resp::Value;
-use crate::protocol::string::{GetCommand, SetCommand};
+use crate::protocol::string::{DelCommand, GetCommand, SetCommand};
 use crate::server::Server;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -42,6 +42,7 @@ impl CommandFactory {
     factory.register("PING", PingCommand);
 
     // Register string commands
+    factory.register("DEL", DelCommand);
     factory.register("GET", GetCommand);
     factory.register("SET", SetCommand);
 
@@ -94,6 +95,7 @@ mod tests {
 
     // Just verify factory is initialized correctly
     assert!(factory.commands.contains_key("PING"));
+    assert!(factory.commands.contains_key("DEL"));
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("SET"));
     assert!(factory.commands.contains_key("HDEL"));

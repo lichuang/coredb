@@ -445,7 +445,7 @@ class TestClusterString(TestClusterBase):
         # SET GET on new key
         print(f"  SET '{test_key}' = '{test_value}' GET...")
         try:
-            result = write_node.execute_command('SET', test_key, test_value, 'GET')
+            result = write_node.set(test_key, test_value, get=True)
             # Should return nil since key didn't exist
             if result is not None:
                 print(f"  FAILED: Expected None, got {result}")
@@ -481,7 +481,7 @@ class TestClusterString(TestClusterBase):
         # SET GET on existing key
         print(f"  SET '{test_key}' = '{new_value}' GET...")
         try:
-            result = write_node.execute_command('SET', test_key, new_value, 'GET')
+            result = write_node.set(test_key, new_value, get=True)
             if result != initial_value:
                 print(f"  FAILED: Expected '{initial_value}', got {result}")
                 return False
@@ -514,7 +514,7 @@ class TestClusterString(TestClusterBase):
         # SET NX GET on new key
         print(f"  SET '{test_key}' = '{test_value}' NX GET...")
         try:
-            result = write_node.execute_command('SET', test_key, test_value, 'NX', 'GET')
+            result = write_node.set(test_key, test_value, nx=True, get=True)
             # Should return nil since key didn't exist
             if result is not None:
                 print(f"  FAILED: Expected None, got {result}")
@@ -550,7 +550,7 @@ class TestClusterString(TestClusterBase):
         # SET NX GET on existing key
         print(f"  SET '{test_key}' = '{new_value}' NX GET...")
         try:
-            result = write_node.execute_command('SET', test_key, new_value, 'NX', 'GET')
+            result = write_node.set(test_key, new_value, nx=True, get=True)
             # Should return current value since key exists (and not set new value)
             if result != initial_value:
                 print(f"  FAILED: Expected '{initial_value}', got {result}")
@@ -586,7 +586,7 @@ class TestClusterString(TestClusterBase):
         # SET XX GET on existing key
         print(f"  SET '{test_key}' = '{new_value}' XX GET...")
         try:
-            result = write_node.execute_command('SET', test_key, new_value, 'XX', 'GET')
+            result = write_node.set(test_key, new_value, xx=True, get=True)
             if result != initial_value:
                 print(f"  FAILED: Expected '{initial_value}', got {result}")
                 return False
@@ -619,7 +619,7 @@ class TestClusterString(TestClusterBase):
         # SET XX GET on non-existent key
         print(f"  SET '{test_key}' = '{test_value}' XX GET...")
         try:
-            result = write_node.execute_command('SET', test_key, test_value, 'XX', 'GET')
+            result = write_node.set(test_key, test_value, xx=True, get=True)
             # Should return nil since key doesn't exist (and not set)
             if result is not None:
                 print(f"  FAILED: Expected None, got {result}")
@@ -634,6 +634,193 @@ class TestClusterString(TestClusterBase):
             print(f"  FAILED: Key was created with value '{value}'")
             return False
         print("  Key not created: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_del_single_key(self) -> bool:
+        """Test deleting a single key."""
+        print("\nTest: DEL single key")
+        
+        test_key = "del_single_key"
+        test_value = "del_single_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # Verify key exists
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set properly")
+            return False
+        print("  Key set: OK")
+        
+        # Delete the key
+        print(f"  DEL '{test_key}'...")
+        try:
+            result = write_node.delete(test_key)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DEL failed - {e}")
+            return False
+        print("  Deleted 1 key: OK")
+        
+        # Verify key is gone
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key still exists after DEL")
+            return False
+        print("  Key no longer exists: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_del_multiple_keys(self) -> bool:
+        """Test deleting multiple keys at once."""
+        print("\nTest: DEL multiple keys")
+        
+        keys = ["del_multi_key1", "del_multi_key2", "del_multi_key3"]
+        
+        write_node = self._get_random_node()
+        
+        # Set multiple keys
+        print("  Setting 3 keys...")
+        for i, key in enumerate(keys):
+            write_node.set(key, f"value{i}")
+        
+        # Delete all keys at once
+        print("  DEL all 3 keys...")
+        try:
+            result = write_node.delete(*keys)
+            if result != 3:
+                print(f"  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DEL failed - {e}")
+            return False
+        print("  Deleted 3 keys: OK")
+        
+        # Verify all keys are gone
+        print("  Verifying all keys deleted...")
+        for key in keys:
+            value = write_node.get(key)
+            if value is not None:
+                print(f"  FAILED: Key '{key}' still exists")
+                return False
+        print("  All keys deleted: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_del_nonexistent_key(self) -> bool:
+        """Test deleting a non-existent key."""
+        print("\nTest: DEL non-existent key")
+        
+        test_key = "del_nonexistent_key"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # Try to delete non-existent key
+        print(f"  DEL non-existent '{test_key}'...")
+        try:
+            result = write_node.delete(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DEL failed - {e}")
+            return False
+        print("  Deleted 0 keys: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_del_mixed_keys(self) -> bool:
+        """Test deleting mix of existing and non-existing keys."""
+        print("\nTest: DEL mixed existing/non-existing keys")
+        
+        existing_keys = ["del_mixed_key1", "del_mixed_key2"]
+        non_existing_keys = ["del_mixed_key3", "del_mixed_key4"]
+        
+        write_node = self._get_random_node()
+        
+        # Set only some keys
+        print("  Setting 2 keys...")
+        for key in existing_keys:
+            write_node.set(key, "value")
+        
+        # Make sure non-existing keys don't exist
+        for key in non_existing_keys:
+            write_node.delete(key)
+        
+        # Delete mix of keys
+        all_keys = existing_keys + non_existing_keys
+        print(f"  DEL 2 existing + 2 non-existing keys...")
+        try:
+            result = write_node.delete(*all_keys)
+            if result != 2:
+                print(f"  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DEL failed - {e}")
+            return False
+        print("  Deleted 2 keys: OK")
+        
+        # Verify existing keys are gone
+        for key in existing_keys:
+            value = write_node.get(key)
+            if value is not None:
+                print(f"  FAILED: Key '{key}' still exists")
+                return False
+        print("  Existing keys deleted: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_del_replication(self) -> bool:
+        """Test that DEL replicates to all nodes."""
+        print("\nTest: DEL replication")
+        
+        test_key = "del_repl_key"
+        test_value = "del_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set the key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # Delete the key
+        print(f"  DEL '{test_key}'...")
+        try:
+            result = write_node.delete(test_key)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DEL failed - {e}")
+            return False
+        
+        # Verify key is gone from all nodes
+        print("  Verifying deletion on all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value is not None:
+                    print(f"    Node {i}: FAILED (key still exists)")
+                    return False
+                print(f"    Node {i}: OK (key deleted)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
         
         print("  PASSED")
         return True
@@ -714,6 +901,11 @@ class TestClusterString(TestClusterBase):
             self.test_set_and_get,
             self.test_set_with_expiration,
             self.test_set_with_keepttl,
+            self.test_del_single_key,
+            self.test_del_multiple_keys,
+            self.test_del_nonexistent_key,
+            self.test_del_mixed_keys,
+            self.test_del_replication,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

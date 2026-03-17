@@ -2,8 +2,10 @@
 //!
 //! This module provides Redis string commands including GET and SET.
 
+pub mod del;
 pub mod get;
 pub mod set;
 
+pub use del::DelCommand;
 pub use get::GetCommand;
 pub use set::SetCommand;

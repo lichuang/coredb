@@ -215,25 +215,43 @@ impl Command for SetCommand {
     let serialized = string_value.serialize();
 
     // Check if key exists and get old value (for NX/XX/GET logic)
-    let existing_value = match server.get(&params.key).await {
+    // We need to track both: (1) if key exists for NX/XX logic, (2) the actual value for GET option
+    enum ExistingKey {
+      None,                     // Key doesn't exist
+      Expired,                  // Key exists but is expired
+      ValidString(StringValue), // Key exists and is a valid string
+      OtherType,                // Key exists but is not a string (Hash, etc.)
+    }
+
+    let existing_key = match server.get(&params.key).await {
       Ok(Some(raw_value)) => {
         match StringValue::deserialize(&raw_value) {
-          Ok(value) if !value.is_expired(now) => Some(value),
-          _ => None, // Expired or corrupted, treat as not exists
+          Ok(value) if !value.is_expired(now) => ExistingKey::ValidString(value),
+          Ok(_) => ExistingKey::Expired, // Expired, treat as not exists
+          Err(_) => ExistingKey::OtherType, // Not a StringValue (might be Hash or other type)
         }
       }
-      _ => None, // Not found or error, treat as not exists
+      _ => ExistingKey::None, // Not found or error
     };
+
+    // Check if key exists (for NX/XX logic)
+    let key_exists = matches!(
+      existing_key,
+      ExistingKey::ValidString(_) | ExistingKey::OtherType
+    );
 
     // Apply NX/XX mode logic
     match params.mode {
       Some(SetMode::Nx) => {
         // NX: Only set if key does not exist
-        if let Some(existing) = existing_value {
+        if key_exists {
           // Key exists, do not set
           return if params.get {
-            // GET with NX: return current value without modification
-            Value::BulkString(Some(existing.data))
+            // GET with NX: return current value if it's a string, otherwise nil
+            match existing_key {
+              ExistingKey::ValidString(v) => Value::BulkString(Some(v.data)),
+              _ => Value::BulkString(None), // Other type, return nil
+            }
           } else {
             // Just return nil (nil bulk string)
             Value::BulkString(None)
@@ -242,7 +260,7 @@ impl Command for SetCommand {
       }
       Some(SetMode::Xx) => {
         // XX: Only set if key exists
-        if existing_value.is_none() {
+        if !key_exists {
           // Key does not exist, do not set
           return if params.get {
             // GET with XX: return nil since key doesn't exist
@@ -258,7 +276,10 @@ impl Command for SetCommand {
     }
 
     // Store the old value for GET option before we overwrite
-    let old_value_data = existing_value.as_ref().map(|v| v.data.clone());
+    let old_value_data = match existing_key {
+      ExistingKey::ValidString(v) => Some(v.data),
+      _ => None, // Return nil for expired, non-existent, or other types
+    };
 
     // Set the new value
     match server.set(params.key, serialized).await {

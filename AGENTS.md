@@ -186,6 +186,8 @@ cd tests
 
 ## Adding New Commands
 
+**⚠️ IMPORTANT: Before implementing any command, ALWAYS search for the command's exact format on https://redis.io/ to understand its syntax, arguments, and return value.**
+
 1. **Create command file** in appropriate subdirectory:
    - String commands: `src/protocol/string/`
    - Hash commands: `src/protocol/hash/`
@@ -212,6 +214,8 @@ cd tests
 
 6. **Add Integration Tests** (REQUIRED):
    - Create test methods in `tests/test_cluster_<type>.py`
+   - **MUST use redis-py standard API only** (e.g., `r.get()`, `r.hset()`, `r.set()`)
+   - **NEVER use `execute_command()`** to send raw commands - this bypasses redis-py's validation and may hide protocol incompatibilities
    - Test basic functionality (e.g., SET/GET for string commands)
    - Test edge cases (empty values, large values, special characters)
    - Test error handling (wrong args, invalid inputs)
@@ -220,6 +224,8 @@ cd tests
 7. **Update README.md**: Mark command as ✅ in the commands table
 
 **⚠️ IMPORTANT: Every new command MUST include both unit tests AND integration tests! Tests are not optional!**
+
+**⚠️ CRITICAL: Integration tests MUST use redis-py standard API. Using `execute_command()` is strictly prohibited as it hides compatibility issues!**
 
 ## Configuration
 

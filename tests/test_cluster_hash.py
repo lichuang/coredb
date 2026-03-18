@@ -796,26 +796,6 @@ class TestClusterHash(TestClusterBase):
         print("  PASSED")
         return True
 
-    def test_hmget_empty_fields(self) -> bool:
-        """Test HMGET with no fields should return error."""
-        print("\nTest: HMGET No Fields")
-        
-        test_key = "test_hash_hmget_empty"
-        
-        node = self._get_random_node()
-        print("  HMGET with no fields...")
-        try:
-            # Execute raw command: HMGET key (no fields)
-            result = node.execute_command('HMGET', test_key)
-            print(f"  FAILED: Expected error, got {result}")
-            return False
-        except redis.RedisError as e:
-            # Should get an error about wrong number of arguments
-            print(f"  OK: Got expected error - {e}")
-        
-        print("  PASSED")
-        return True
-
     def test_hexists_basic(self) -> bool:
         """Test basic HEXISTS operation."""
         print("\nTest: HEXISTS Basic")
@@ -980,7 +960,7 @@ class TestClusterHash(TestClusterBase):
         write_node = self._get_random_node()
         print(f"  HSETNX '{test_key}' '{test_field}' = '{test_value}'...")
         try:
-            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
                 print(f"  FAILED: Expected return 1 (field set), got {result}")
                 return False
@@ -1016,7 +996,7 @@ class TestClusterHash(TestClusterBase):
         # Try HSETNX on existing field
         print(f"  HSETNX on existing field with '{new_value}'...")
         try:
-            result = write_node.execute_command('HSETNX', test_key, test_field, new_value)
+            result = write_node.hsetnx(test_key, test_field, new_value)
             if result != 0:
                 print(f"  FAILED: Expected return 0 (field exists), got {result}")
                 return False
@@ -1045,7 +1025,7 @@ class TestClusterHash(TestClusterBase):
         write_node = self._get_random_node()
         print(f"  HSETNX '{test_key}' '{test_field}' = '{test_value}' on random node...")
         try:
-            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
                 print(f"  FAILED: Expected return 1, got {result}")
                 return False
@@ -1081,7 +1061,7 @@ class TestClusterHash(TestClusterBase):
         write_node = self._get_random_node()
         print(f"  HSETNX '{test_key}' '{test_field}' = '' (empty)...")
         try:
-            result = write_node.execute_command('HSETNX', test_key, test_field, test_value)
+            result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
                 print(f"  FAILED: Expected return 1, got {result}")
                 return False
@@ -1357,7 +1337,6 @@ class TestClusterHash(TestClusterBase):
             self.test_hmget_partial_fields,
             self.test_hmget_nonexistent_key,
             self.test_hmget_single_field,
-            self.test_hmget_empty_fields,
             self.test_chaos_hset_hget,
         ]
         

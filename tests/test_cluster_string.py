@@ -130,8 +130,7 @@ class TestClusterString(TestClusterBase):
         # SET with KEEPTTL - should preserve the original expiration
         print("  SET with KEEPTTL...")
         try:
-            # Use execute_command to send raw KEEPTTL option
-            write_node.execute_command('SET', test_key, new_value, 'KEEPTTL')
+            write_node.set(test_key, new_value, keepttl=True)
         except redis.RedisError as e:
             print(f"  FAILED: SET KEEPTTL failed - {e}")
             return False
@@ -309,7 +308,7 @@ class TestClusterString(TestClusterBase):
         write_node = self._get_random_node()
         print(f"  SET '{test_key}' = '{test_value}' NX on a random node...")
         try:
-            result = write_node.execute_command('SET', test_key, test_value, 'NX')
+            result = write_node.set(test_key, test_value, nx=True)
             if result is not True:
                 print(f"  FAILED: Expected True, got {result}")
                 return False
@@ -344,7 +343,7 @@ class TestClusterString(TestClusterBase):
         # Try SET NX on existing key
         print(f"  SET '{test_key}' = '{new_value}' NX...")
         try:
-            result = write_node.execute_command('SET', test_key, new_value, 'NX')
+            result = write_node.set(test_key, new_value, nx=True)
             if result is not None:
                 print(f"  FAILED: Expected None (nil), got {result}")
                 return False
@@ -379,7 +378,7 @@ class TestClusterString(TestClusterBase):
         # SET XX on existing key
         print(f"  SET '{test_key}' = '{new_value}' XX...")
         try:
-            result = write_node.execute_command('SET', test_key, new_value, 'XX')
+            result = write_node.set(test_key, new_value, xx=True)
             if result is not True:
                 print(f"  FAILED: Expected True, got {result}")
                 return False
@@ -412,7 +411,7 @@ class TestClusterString(TestClusterBase):
         # SET XX on non-existent key
         print(f"  SET '{test_key}' = '{test_value}' XX...")
         try:
-            result = write_node.execute_command('SET', test_key, test_value, 'XX')
+            result = write_node.set(test_key, test_value, xx=True)
             if result is not None:
                 print(f"  FAILED: Expected None (nil), got {result}")
                 return False

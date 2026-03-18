@@ -294,8 +294,59 @@ cargo run -- --conf {config file}
 
 ### Raft Integration
 - All writes go through Raft consensus via `server.set()` / `server.delete()`
+- **Batch writes** use `server.batch_write()` for atomic multi-key operations (rockraft 0.1.4+)
 - Reads can be local via `server.get()` (with optional consistency levels)
 - The `rockraft` crate handles leader election, log replication, and state machine
+
+### Batch Atomic Writes (rockraft 0.1.4+)
+
+**Rule**: Any command that modifies multiple data items MUST use `batch_write()` for atomic all-or-nothing semantics.
+
+This ensures either all operations succeed together, or none are applied.
+
+#### Implementation
+
+```rust
+// Prepare all entries to modify
+let mut entries: Vec<rockraft::raft::types::UpsertKV> = Vec::new();
+
+// Add all field operations
+for (field, value) in fields {
+    entries.push(rockraft::raft::types::UpsertKV::insert(key, value));
+}
+
+// Add metadata update
+entries.push(rockraft::raft::types::UpsertKV::insert(meta_key, meta_value));
+
+// Atomic batch write - all or nothing
+if let Err(e) = server.batch_write(entries).await {
+    return Value::error(format!("ERR batch write failed: {}", e));
+}
+```
+
+#### Testing Requirements
+
+Commands using batch write MUST include `all_or_none` type integration tests:
+
+```python
+def test_xxx_all_or_none(self) -> bool:
+    """Test that multi-key operations are atomic (all or nothing).
+    
+    Verifies that when a command modifies multiple items,
+    either all modifications are applied, or none are.
+    """
+    # Setup: prepare data
+    # Operation: execute multi-key command
+    # Verify: check all items modified (not partial)
+```
+
+#### Examples
+
+| Command | Batch Write Usage | Test Type |
+|---------|-------------------|-----------|
+| HSET (multiple fields) | Fields + metadata | `test_hset_atomicity_batch_consistency` |
+| HDEL (multiple fields) | Deletions + metadata | `test_hdel_atomicity_batch_consistency` |
+| HSETNX | Field + metadata | `test_hsetnx_atomicity_field_creation` |
 
 ## Common Tasks
 

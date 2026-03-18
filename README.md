@@ -137,7 +137,7 @@ print(r.get('key'))
 | Command | Description | Status |
 |---------|-------------|--------|
 | `HGET key field` | Get hash field value | ✅ |
-| `HSET key field value [field value ...] [NX\|XX]` | Set hash field(s) | ✅ |
+| `HSET key field value [field value ...]` | Set hash field(s) | ✅ |
 | `HDEL key field [field ...]` | Delete hash field(s) | ✅ |
 | `HEXISTS key field` | Check if field exists | ✅ |
 | `HGETALL key` | Get all fields and values | ✅ |

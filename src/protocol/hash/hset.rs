@@ -5,6 +5,9 @@
 //!
 //! Returns:
 //! - The number of fields that were added (not updated)
+//!
+//! Note: This command uses atomic batch write to ensure all fields and metadata
+//! are written together as a single atomic operation.
 
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
@@ -107,19 +110,23 @@ impl Command for HSetCommand {
     let version = metadata.version;
     let mut added_count = 0i64;
 
-    // Process each field-value pair
-    for (field, value_data) in args.fields {
-      // Use hex-encoded sub_key for storage (guaranteed valid UTF-8)
-      let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &field);
+    // Prepare batch write entries
+    let mut entries: Vec<rockraft::raft::types::UpsertKV> = Vec::new();
 
-      // Check if field exists
+    // Process each field-value pair and prepare entries
+    for (field, value_data) in &args.fields {
+      // Use hex-encoded sub_key for storage (guaranteed valid UTF-8)
+      let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, field);
+
+      // Check if field exists (for counting added fields)
       let field_exists = matches!(server.get(&sub_key_str).await, Ok(Some(_)));
 
-      // Store the field value
-      let field_value = HashFieldValue::new(value_data);
-      if let Err(e) = server.set(sub_key_str, field_value.serialize()).await {
-        return Value::error(format!("ERR failed to store field: {}", e));
-      }
+      // Prepare field value entry
+      let field_value = HashFieldValue::new(value_data.clone());
+      entries.push(rockraft::raft::types::UpsertKV::insert(
+        sub_key_str,
+        &field_value.serialize(),
+      ));
 
       // Update metadata if this is a new field
       if !field_exists {
@@ -128,9 +135,15 @@ impl Command for HSetCommand {
       }
     }
 
-    // Store metadata (only if we modified something or it's a new hash)
-    if let Err(e) = server.set(args.key.clone(), metadata.serialize()).await {
-      return Value::error(format!("ERR failed to store metadata: {}", e));
+    // Add metadata entry
+    entries.push(rockraft::raft::types::UpsertKV::insert(
+      args.key.clone(),
+      &metadata.serialize(),
+    ));
+
+    // Perform atomic batch write
+    if let Err(e) = server.batch_write(entries).await {
+      return Value::error(format!("ERR failed to batch write: {}", e));
     }
 
     // Return the number of newly added fields

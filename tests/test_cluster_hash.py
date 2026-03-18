@@ -162,6 +162,205 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
+
+    def test_hset_atomicity_batch_consistency(self) -> bool:
+        """Test HSET batch write atomicity - all fields written together.
+        
+        This test verifies that when HSET is called with multiple fields,
+        either all fields are written or none are (atomicity guarantee).
+        Since we cannot easily simulate failures, we verify consistency:
+        - After HSET, all fields should be readable from all nodes
+        - Metadata (HLEN) should be consistent with actual field count
+        """
+        print("\nTest: HSET Batch Atomicity - Consistency Check")
+        
+        test_key = "test_hash_atomicity_batch"
+        # Use many fields to increase chance of catching any inconsistency
+        fields = {f"field_{i}": f"value_{i}" for i in range(50)}
+        
+        write_node = self._get_random_node()
+        print(f"  HSET '{test_key}' with {len(fields)} fields atomically...")
+        
+        try:
+            result = write_node.hset(test_key, mapping=fields)
+            if result != len(fields):
+                print(f"  FAILED: Expected return {len(fields)}, got {result}")
+                return False
+            print(f"    HSET returned {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # Verify from all nodes: check HLEN and all fields
+        print("  Verify atomicity from all nodes (HLEN consistency)...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                # Check HLEN matches expected
+                hlen = node.conn.hlen(test_key)
+                if hlen != len(fields):
+                    print(f"    Node {i}: FAILED (HLEN expected {len(fields)}, got {hlen})")
+                    return False
+                
+                # Check all fields exist (verifies batch was atomic)
+                for field, expected_value in fields.items():
+                    actual_value = node.conn.hget(test_key, field)
+                    if actual_value != expected_value:
+                        print(f"    Node {i}: FAILED (field '{field}' expected '{expected_value}', got '{actual_value}')")
+                        return False
+                
+                print(f"    Node {i}: OK (HLEN={hlen}, all {len(fields)} fields verified)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hdel_atomicity_batch_consistency(self) -> bool:
+        """Test HDEL batch write atomicity - all fields deleted together.
+        
+        This test verifies that when HDEL is called with multiple fields,
+        either all specified fields are deleted or none are (atomicity guarantee).
+        We verify consistency: after HDEL, metadata should match actual field count.
+        """
+        print("\nTest: HDEL Batch Atomicity - Consistency Check")
+        
+        test_key = "test_hash_hdel_atomicity"
+        # Create hash with many fields
+        all_fields = {f"field_{i}": f"value_{i}" for i in range(30)}
+        fields_to_delete = [f"field_{i}" for i in range(0, 20, 2)]  # 10 fields to delete
+        remaining_fields = {k: v for k, v in all_fields.items() if k not in fields_to_delete}
+        
+        write_node = self._get_random_node()
+        print(f"  Setup: HSET '{test_key}' with {len(all_fields)} fields...")
+        
+        try:
+            result = write_node.hset(test_key, mapping=all_fields)
+            if result != len(all_fields):
+                print(f"  FAILED: Setup HSET expected {len(all_fields)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: Setup HSET failed - {e}")
+            return False
+        
+        # Record state before HDEL
+        hlen_before = write_node.hlen(test_key)
+        print(f"    HLEN before HDEL: {hlen_before}")
+        
+        # Delete multiple fields atomically
+        print(f"  HDEL {len(fields_to_delete)} fields atomically...")
+        try:
+            result = write_node.hdel(test_key, *fields_to_delete)
+            if result != len(fields_to_delete):
+                print(f"  FAILED: HDEL expected {len(fields_to_delete)}, got {result}")
+                return False
+            print(f"    HDEL returned {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HDEL failed - {e}")
+            return False
+        
+        # Verify from all nodes: check consistency
+        print("  Verify atomicity from all nodes (consistency check)...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                # Check HLEN is correct
+                hlen = node.conn.hlen(test_key)
+                expected_len = len(remaining_fields)
+                if hlen != expected_len:
+                    print(f"    Node {i}: FAILED (HLEN expected {expected_len}, got {hlen})")
+                    return False
+                
+                # Verify deleted fields are gone
+                for field in fields_to_delete:
+                    if node.conn.hexists(test_key, field):
+                        print(f"    Node {i}: FAILED (deleted field '{field}' still exists)")
+                        return False
+                
+                # Verify remaining fields still exist
+                for field, expected_value in remaining_fields.items():
+                    actual_value = node.conn.hget(test_key, field)
+                    if actual_value != expected_value:
+                        print(f"    Node {i}: FAILED (field '{field}' expected '{expected_value}', got '{actual_value}')")
+                        return False
+                
+                print(f"    Node {i}: OK (HLEN={hlen}, {len(fields_to_delete)} deleted, {len(remaining_fields)} remain)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hsetnx_atomicity_field_creation(self) -> bool:
+        """Test HSETNX atomicity - field and metadata updated together.
+        
+        HSETNX should atomically check field existence and create it with metadata update.
+        If field exists, nothing should change. If not, both field and metadata updated.
+        """
+        print("\nTest: HSETNX Atomicity - Field Creation Consistency")
+        
+        test_key = "test_hash_hsetnx_atomicity"
+        
+        write_node = self._get_random_node()
+        
+        # First HSETNX should create field and update metadata
+        print("  First HSETNX (field does not exist)...")
+        try:
+            result = write_node.hsetnx(test_key, "field1", "value1")
+            if result != 1:
+                print(f"  FAILED: First HSETNX expected 1, got {result}")
+                return False
+            
+            hlen = write_node.hlen(test_key)
+            if hlen != 1:
+                print(f"  FAILED: HLEN expected 1 after first HSETNX, got {hlen}")
+                return False
+            print(f"    OK: HSETNX returned 1, HLEN={hlen}")
+        except redis.RedisError as e:
+            print(f"  FAILED: First HSETNX failed - {e}")
+            return False
+        
+        # Second HSETNX on same field should not change anything
+        print("  Second HSETNX on same field (should not change)...")
+        try:
+            result = write_node.hsetnx(test_key, "field1", "new_value")
+            if result != 0:
+                print(f"  FAILED: Second HSETNX expected 0, got {result}")
+                return False
+            
+            # Verify value not changed
+            value = write_node.hget(test_key, "field1")
+            if value != "value1":
+                print(f"  FAILED: Value was changed to '{value}', expected 'value1'")
+                return False
+            
+            # Verify HLEN not changed
+            hlen = write_node.hlen(test_key)
+            if hlen != 1:
+                print(f"  FAILED: HLEN changed to {hlen}, expected 1")
+                return False
+            
+            print(f"    OK: HSETNX returned 0, value unchanged, HLEN={hlen}")
+        except redis.RedisError as e:
+            print(f"  FAILED: Second HSETNX failed - {e}")
+            return False
+        
+        # Verify from all nodes
+        print("  Verify consistency from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.hget(test_key, "field1")
+                hlen = node.conn.hlen(test_key)
+                if value != "value1" or hlen != 1:
+                    print(f"    Node {i}: FAILED (value='{value}', HLEN={hlen})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
     
     def test_hset_update_existing(self) -> bool:
         """Test HSET updating existing field returns 0."""
@@ -1306,11 +1505,13 @@ class TestClusterHash(TestClusterBase):
             self.test_hset_and_hget,
             self.test_hset_multiple_fields,
             self.test_hset_multiple_fields_mixed,
+            self.test_hset_atomicity_batch_consistency,
             self.test_hset_update_existing,
             self.test_hget_nonexistent,
             self.test_hgetall_basic,
             self.test_hgetall_empty_hash,
             self.test_hgetall_after_hdel,
+            self.test_hdel_atomicity_batch_consistency,
             self.test_hgetall_after_hset_update,
             self.test_hkeys_basic,
             self.test_hkeys_empty_hash,
@@ -1328,6 +1529,7 @@ class TestClusterHash(TestClusterBase):
             self.test_hsetnx_new_field,
             self.test_hsetnx_existing_field,
             self.test_hsetnx_replication,
+            self.test_hsetnx_atomicity_field_creation,
             self.test_hsetnx_empty_value,
             self.test_hvals_basic,
             self.test_hvals_empty_hash,

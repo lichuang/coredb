@@ -6,6 +6,9 @@
 //! Returns:
 //! - The number of fields that were removed from the hash
 //! - 0 if the key does not exist or if no fields were removed
+//!
+//! Note: This command uses atomic batch write to ensure all field deletions
+//! and metadata update are applied together as a single atomic operation.
 
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
@@ -69,17 +72,18 @@ impl Command for HDelCommand {
     let version = metadata.version;
     let mut deleted_count = 0i64;
 
-    // Delete each field
-    for field in fields {
-      let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, &field);
+    // Prepare batch write entries
+    let mut entries: Vec<rockraft::raft::types::UpsertKV> = Vec::new();
+
+    // Check each field and prepare delete entries
+    for field in &fields {
+      let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, field);
 
       // Check if field exists before deleting
       match server.get(&sub_key_str).await {
         Ok(Some(_)) => {
-          // Field exists, delete it
-          if let Err(e) = server.delete(&sub_key_str).await {
-            return Value::error(format!("ERR failed to delete field: {}", e));
-          }
+          // Field exists, prepare delete entry
+          entries.push(rockraft::raft::types::UpsertKV::delete(sub_key_str));
           deleted_count += 1;
           metadata.decr_size();
         }
@@ -89,13 +93,20 @@ impl Command for HDelCommand {
       }
     }
 
-    // Update metadata (only if we deleted something)
-    if deleted_count > 0 {
-      // If hash is now empty, we could optionally delete the metadata key
-      // For now, we keep it to maintain version history
-      if let Err(e) = server.set(key.clone(), metadata.serialize()).await {
-        return Value::error(format!("ERR failed to update metadata: {}", e));
-      }
+    // If no fields to delete, return early
+    if deleted_count == 0 {
+      return Value::Integer(0);
+    }
+
+    // Add metadata update entry
+    entries.push(rockraft::raft::types::UpsertKV::insert(
+      key.clone(),
+      &metadata.serialize(),
+    ));
+
+    // Perform atomic batch write
+    if let Err(e) = server.batch_write(entries).await {
+      return Value::error(format!("ERR failed to batch write: {}", e));
     }
 
     Value::Integer(deleted_count)

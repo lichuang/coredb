@@ -6,6 +6,9 @@
 //! Returns:
 //! - 1 if the field was set (it did not exist before)
 //! - 0 if the field already exists and was not set
+//!
+//! Note: This command uses atomic batch write to ensure the field and metadata
+//! are written together as a single atomic operation.
 
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
@@ -106,18 +109,21 @@ impl Command for HSetNxCommand {
       return Value::Integer(0);
     }
 
-    // Field does not exist, set it
-    let field_value = HashFieldValue::new(args.value);
-    if let Err(e) = server.set(sub_key_str, field_value.serialize()).await {
-      return Value::error(format!("ERR failed to store field: {}", e));
-    }
-
-    // Update metadata (new field)
+    // Field does not exist, update metadata size first
     metadata.incr_size();
 
-    // Store metadata
-    if let Err(e) = server.set(args.key.clone(), metadata.serialize()).await {
-      return Value::error(format!("ERR failed to store metadata: {}", e));
+    // Prepare batch write entries
+    let field_value = HashFieldValue::new(args.value);
+    let entries = vec![
+      // Insert field
+      rockraft::raft::types::UpsertKV::insert(sub_key_str, &field_value.serialize()),
+      // Update metadata
+      rockraft::raft::types::UpsertKV::insert(args.key.clone(), &metadata.serialize()),
+    ];
+
+    // Perform atomic batch write
+    if let Err(e) = server.batch_write(entries).await {
+      return Value::error(format!("ERR failed to batch write: {}", e));
     }
 
     // Return 1 to indicate the field was set

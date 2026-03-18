@@ -97,6 +97,21 @@ impl Server {
     }
   }
 
+  /// Batch write multiple entries atomically (through Raft consensus)
+  ///
+  /// This ensures all entries are written as a single atomic operation.
+  /// Either all entries are applied, or none are.
+  pub async fn batch_write(
+    &self,
+    entries: Vec<rockraft::raft::types::UpsertKV>,
+  ) -> Result<rockraft::raft::types::AppliedState, String> {
+    let req = rockraft::raft::types::BatchWriteReq { entries };
+    match self.raft_node.batch_write(req).await {
+      Ok(reply) => Ok(reply),
+      Err(e) => Err(format!("Failed to batch write: {}", e)),
+    }
+  }
+
   /// Scan keys by prefix from the state machine (forwarded to leader)
   /// Returns a vector of (key, value) tuples where keys start with the given prefix
   pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {

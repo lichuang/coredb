@@ -121,7 +121,7 @@ print(r.get('key'))
 | `DEL key [key ...]` | Delete key(s) | ✅ |
 | `MGET key [key ...]` | Get multiple keys | ✅ |
 | `MSET key value [key value ...]` | Set multiple key-value pairs | ✅ |
-| `INCR key` | Increment key by 1 | ❌ |
+| `INCR key` | Increment key by 1 | ✅ |
 | `INCRBY key increment` | Increment key by value | ❌ |
 | `DECR key` | Decrement key by 1 | ❌ |
 | `DECRBY key decrement` | Decrement key by value | ❌ |

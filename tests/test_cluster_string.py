@@ -1180,6 +1180,74 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_incr_invalid_value(self) -> bool:
+        print("\nTest: INCR on non-integer string value")
+        
+        test_key = "incr_invalid_string_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = 'not_an_integer'...")
+        try:
+            write_node.set(test_key, "not_an_integer")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  INCR '{test_key}' (should fail)...")
+        try:
+            result = write_node.incr(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "not an integer" not in error_msg and "out of range" not in error_msg:
+                print(f"  FAILED: Expected 'not an integer' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        value = write_node.get(test_key)
+        if value != "not_an_integer":
+            print(f"  FAILED: Value was modified to '{value}', expected 'not_an_integer'")
+            return False
+        print("  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_incr_wrong_type(self) -> bool:
+        print("\nTest: INCR on hash key (wrong type)")
+        
+        test_key = "incr_wrong_type_key"
+        write_node = self._get_random_node()
+        
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        print(f"  INCR '{test_key}' (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.incr(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -1271,6 +1339,8 @@ class TestClusterString(TestClusterBase):
             self.test_mset_overwrite,
             self.test_mset_replication,
             self.test_mset_atomicity_batch_consistency,
+            self.test_incr_invalid_value,
+            self.test_incr_wrong_type,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

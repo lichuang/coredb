@@ -973,6 +973,213 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_mset_single_pair(self) -> bool:
+        """Test MSET with a single key-value pair."""
+        print("\nTest: MSET single pair")
+        
+        test_key = "mset_single_key"
+        test_value = "mset_single_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # MSET the single pair
+        print(f"  MSET '{test_key}' = '{test_value}'...")
+        try:
+            result = write_node.mset({test_key: test_value})
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MSET failed - {e}")
+            return False
+        
+        # Verify value was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set correctly, got '{value}'")
+            return False
+        print(f"  Key set successfully: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mset_multiple_pairs(self) -> bool:
+        """Test MSET with multiple key-value pairs."""
+        print("\nTest: MSET multiple pairs")
+        
+        pairs = {
+            "mset_key1": "mset_value1",
+            "mset_key2": "mset_value2",
+            "mset_key3": "mset_value3",
+        }
+        
+        write_node = self._get_random_node()
+        
+        # Make sure keys don't exist
+        for key in pairs.keys():
+            write_node.delete(key)
+        
+        # MSET multiple pairs
+        print(f"  MSET {len(pairs)} key-value pairs...")
+        try:
+            result = write_node.mset(pairs)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MSET failed - {e}")
+            return False
+        
+        # Verify all values were set
+        print("  Verifying all keys...")
+        for key, expected_value in pairs.items():
+            value = write_node.get(key)
+            if value != expected_value:
+                print(f"  FAILED: Key '{key}' expected '{expected_value}', got '{value}'")
+                return False
+        print(f"  All keys set correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mset_overwrite(self) -> bool:
+        """Test MSET overwrites existing values."""
+        print("\nTest: MSET overwrites existing values")
+        
+        test_key = "mset_overwrite_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # Verify initial value
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Initial value not set correctly")
+            return False
+        
+        # MSET to overwrite
+        print(f"  MSET '{test_key}' = '{new_value}'...")
+        try:
+            result = write_node.mset({test_key: new_value})
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MSET failed - {e}")
+            return False
+        
+        # Verify value was overwritten
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Value not overwritten, got '{value}'")
+            return False
+        print(f"  Value overwritten successfully: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mset_replication(self) -> bool:
+        """Test that MSET data is replicated to all nodes."""
+        print("\nTest: MSET replication")
+        
+        pairs = {
+            "mset_repl1": "repl_value1",
+            "mset_repl2": "repl_value2",
+        }
+        
+        write_node = self._get_random_node()
+        
+        # MSET on random node
+        print(f"  MSET {len(pairs)} pairs on random node...")
+        try:
+            result = write_node.mset(pairs)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MSET failed - {e}")
+            return False
+        
+        # Verify all nodes have the data
+        print("  Verifying all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            for key, expected_value in pairs.items():
+                try:
+                    value = node.conn.get(key)
+                    if value != expected_value:
+                        print(f"    Node {i}: FAILED (key '{key}' expected '{expected_value}', got '{value}')")
+                        return False
+                except redis.RedisError as e:
+                    print(f"    Node {i}: FAILED - {e}")
+                    return False
+            print(f"    Node {i}: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mset_atomicity_batch_consistency(self) -> bool:
+        """Test that MSET is atomic (all or nothing).
+        
+        Verifies that when MSET modifies multiple keys,
+        either all modifications are applied, or none are.
+        """
+        print("\nTest: MSET atomicity (all or nothing)")
+        
+        # Setup: Set initial values for all keys
+        keys = ["mset_atomic1", "mset_atomic2", "mset_atomic3"]
+        initial_values = {k: f"initial_{k}" for k in keys}
+        new_values = {k: f"new_{k}" for k in keys}
+        
+        write_node = self._get_random_node()
+        
+        # Set initial values
+        print("  Setting initial values...")
+        for key, value in initial_values.items():
+            write_node.set(key, value)
+        
+        # Verify initial state
+        for key, expected in initial_values.items():
+            value = write_node.get(key)
+            if value != expected:
+                print(f"  FAILED: Initial setup failed for '{key}'")
+                return False
+        
+        # MSET all keys at once
+        print("  MSET all keys...")
+        try:
+            result = write_node.mset(new_values)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MSET failed - {e}")
+            return False
+        
+        # Verify ALL keys were updated (not partial)
+        print("  Verifying all keys updated...")
+        all_updated = True
+        for key, expected in new_values.items():
+            value = write_node.get(key)
+            if value != expected:
+                print(f"    FAILED: Key '{key}' expected '{expected}', got '{value}'")
+                all_updated = False
+        
+        if not all_updated:
+            print("  FAILED: Not all keys were updated (partial update detected)")
+            return False
+        
+        print("  All keys updated atomically: OK")
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -1059,6 +1266,11 @@ class TestClusterString(TestClusterBase):
             self.test_mget_nonexistent_keys,
             self.test_mget_mixed_keys,
             self.test_mget_replication,
+            self.test_mset_single_pair,
+            self.test_mset_multiple_pairs,
+            self.test_mset_overwrite,
+            self.test_mset_replication,
+            self.test_mset_atomicity_batch_consistency,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

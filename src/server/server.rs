@@ -1,5 +1,12 @@
+use std::error::Error;
+use std::io::Result as IoResult;
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use rockraft::node::{RaftNode, RaftNodeBuilder};
+use rockraft::raft::types::{
+  AppliedState, BatchWriteReq, Cmd, GetKVReq, LogEntry, ScanPrefixReq, UpsertKV,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, warn};
@@ -13,7 +20,7 @@ pub struct Server {
   local_addr: SocketAddr,
   cmd_factory: Arc<CommandFactory>,
   /// Raft node for distributed consensus
-  raft_node: Arc<rockraft::node::RaftNode>,
+  raft_node: Arc<RaftNode>,
   /// Server configuration
   config: Config,
 }
@@ -25,10 +32,10 @@ impl Server {
   /// 1. Creates and starts the Raft node
   /// 2. Binds the TCP server
   /// 3. Returns the initialized Server instance
-  pub async fn start(config: Config) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
+  pub async fn start(config: Config) -> Result<Arc<Self>, Box<dyn Error>> {
     // Create and start Raft node
     info!("Creating Raft node...");
-    let raft_node = rockraft::node::RaftNodeBuilder::build(&config.raft)
+    let raft_node = RaftNodeBuilder::build(&config.raft)
       .await
       .map_err(|e| format!("Failed to create Raft node: {}", e))?;
     info!("Raft node created and started successfully");
@@ -60,7 +67,7 @@ impl Server {
   /// Get a value from the store (local read)
   pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
     // Use RaftNode's read for consistent read
-    let req = rockraft::raft::types::GetKVReq {
+    let req = GetKVReq {
       key: key.to_string(),
     };
     match self.raft_node.read(req).await {
@@ -72,9 +79,8 @@ impl Server {
   /// Set a value in the store (through Raft consensus)
   pub async fn set(&self, key: String, value: Vec<u8>) -> Result<(), String> {
     // Create UpsertKV command
-    let upsert_kv =
-      rockraft::raft::types::Cmd::UpsertKV(rockraft::raft::types::UpsertKV::insert(&key, &value));
-    let entry = rockraft::raft::types::LogEntry::new(upsert_kv);
+    let upsert_kv = Cmd::UpsertKV(UpsertKV::insert(&key, &value));
+    let entry = LogEntry::new(upsert_kv);
 
     // Write through Raft (will be forwarded to leader if needed)
     match self.raft_node.write(entry).await {
@@ -86,9 +92,8 @@ impl Server {
   /// Delete a key from the store (through Raft consensus)
   pub async fn delete(&self, key: &str) -> Result<bool, String> {
     // Create Delete command
-    let upsert_kv =
-      rockraft::raft::types::Cmd::UpsertKV(rockraft::raft::types::UpsertKV::delete(key));
-    let entry = rockraft::raft::types::LogEntry::new(upsert_kv);
+    let upsert_kv = Cmd::UpsertKV(UpsertKV::delete(key));
+    let entry = LogEntry::new(upsert_kv);
 
     // Write through Raft (will be forwarded to leader if needed)
     match self.raft_node.write(entry).await {
@@ -101,11 +106,8 @@ impl Server {
   ///
   /// This ensures all entries are written as a single atomic operation.
   /// Either all entries are applied, or none are.
-  pub async fn batch_write(
-    &self,
-    entries: Vec<rockraft::raft::types::UpsertKV>,
-  ) -> Result<rockraft::raft::types::AppliedState, String> {
-    let req = rockraft::raft::types::BatchWriteReq { entries };
+  pub async fn batch_write(&self, entries: Vec<UpsertKV>) -> Result<AppliedState, String> {
+    let req = BatchWriteReq { entries };
     match self.raft_node.batch_write(req).await {
       Ok(reply) => Ok(reply),
       Err(e) => Err(format!("Failed to batch write: {}", e)),
@@ -115,7 +117,7 @@ impl Server {
   /// Scan keys by prefix from the state machine (forwarded to leader)
   /// Returns a vector of (key, value) tuples where keys start with the given prefix
   pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
-    let req = rockraft::raft::types::ScanPrefixReq {
+    let req = ScanPrefixReq {
       prefix: prefix.to_vec(),
     };
     match self.raft_node.scan_prefix(req).await {
@@ -134,7 +136,7 @@ impl Server {
     self: Arc<Self>,
     mut stream: TcpStream,
     peer_addr: SocketAddr,
-  ) -> std::io::Result<()> {
+  ) -> IoResult<()> {
     let mut buffer = vec![0u8; 8192]; // 8KB buffer
     let mut pending = Vec::new(); // Buffer for incomplete commands
 
@@ -212,7 +214,7 @@ impl Server {
   }
 
   /// Shutdown the server and Raft node
-  pub async fn shutdown(&self) -> Result<(), Box<dyn std::error::Error>> {
+  pub async fn shutdown(&self) -> Result<(), Box<dyn Error>> {
     info!("Shutting down Raft node...");
     self.raft_node.shutdown().await?;
     info!("Raft node shutdown successfully");

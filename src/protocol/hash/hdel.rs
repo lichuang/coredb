@@ -10,6 +10,8 @@
 //! Note: This command uses atomic batch write to ensure all field deletions
 //! and metadata update are applied together as a single atomic operation.
 
+use rockraft::raft::types::UpsertKV;
+
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -73,7 +75,7 @@ impl Command for HDelCommand {
     let mut deleted_count = 0i64;
 
     // Prepare batch write entries
-    let mut entries: Vec<rockraft::raft::types::UpsertKV> = Vec::new();
+    let mut entries: Vec<UpsertKV> = Vec::new();
 
     // Check each field and prepare delete entries
     for field in &fields {
@@ -83,7 +85,7 @@ impl Command for HDelCommand {
       match server.get(&sub_key_str).await {
         Ok(Some(_)) => {
           // Field exists, prepare delete entry
-          entries.push(rockraft::raft::types::UpsertKV::delete(sub_key_str));
+          entries.push(UpsertKV::delete(sub_key_str));
           deleted_count += 1;
           metadata.decr_size();
         }
@@ -99,10 +101,7 @@ impl Command for HDelCommand {
     }
 
     // Add metadata update entry
-    entries.push(rockraft::raft::types::UpsertKV::insert(
-      key.clone(),
-      &metadata.serialize(),
-    ));
+    entries.push(UpsertKV::insert(key.clone(), &metadata.serialize()));
 
     // Perform atomic batch write
     if let Err(e) = server.batch_write(entries).await {

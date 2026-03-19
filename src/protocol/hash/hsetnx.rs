@@ -10,6 +10,8 @@
 //! Note: This command uses atomic batch write to ensure the field and metadata
 //! are written together as a single atomic operation.
 
+use rockraft::raft::types::UpsertKV;
+
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -116,9 +118,9 @@ impl Command for HSetNxCommand {
     let field_value = HashFieldValue::new(args.value);
     let entries = vec![
       // Insert field
-      rockraft::raft::types::UpsertKV::insert(sub_key_str, &field_value.serialize()),
+      UpsertKV::insert(sub_key_str, &field_value.serialize()),
       // Update metadata
-      rockraft::raft::types::UpsertKV::insert(args.key.clone(), &metadata.serialize()),
+      UpsertKV::insert(args.key.clone(), &metadata.serialize()),
     ];
 
     // Perform atomic batch write

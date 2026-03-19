@@ -13,11 +13,13 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::thread;
+  use std::time::Duration;
 
   #[test]
   fn test_now_ms() {
     let t1 = now_ms();
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    thread::sleep(Duration::from_millis(10));
     let t2 = now_ms();
     assert!(t2 > t1);
   }

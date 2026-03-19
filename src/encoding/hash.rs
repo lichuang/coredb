@@ -29,6 +29,10 @@
 //!                       +---------------+
 //! ```
 
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde::{Deserialize, Serialize};
 
 use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
@@ -75,8 +79,8 @@ impl HashMetadata {
   fn generate_version() -> u64 {
     // Use current timestamp as version for simplicity
     // In production, this could be a combination of timestamp and counter
-    std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+      .duration_since(UNIX_EPOCH)
       .map(|d| d.as_millis() as u64)
       .unwrap_or(0)
   }
@@ -143,15 +147,15 @@ pub enum DecodeError {
   InvalidData,
 }
 
-impl std::fmt::Display for DecodeError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for DecodeError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     match self {
       DecodeError::InvalidData => write!(f, "invalid data for decoding"),
     }
   }
 }
 
-impl std::error::Error for DecodeError {}
+impl Error for DecodeError {}
 
 /// Hash field-value pair structure for storage
 ///

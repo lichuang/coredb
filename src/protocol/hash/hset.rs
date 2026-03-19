@@ -9,6 +9,8 @@
 //! Note: This command uses atomic batch write to ensure all fields and metadata
 //! are written together as a single atomic operation.
 
+use rockraft::raft::types::UpsertKV;
+
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -111,7 +113,7 @@ impl Command for HSetCommand {
     let mut added_count = 0i64;
 
     // Prepare batch write entries
-    let mut entries: Vec<rockraft::raft::types::UpsertKV> = Vec::new();
+    let mut entries: Vec<UpsertKV> = Vec::new();
 
     // Process each field-value pair and prepare entries
     for (field, value_data) in &args.fields {
@@ -123,10 +125,7 @@ impl Command for HSetCommand {
 
       // Prepare field value entry
       let field_value = HashFieldValue::new(value_data.clone());
-      entries.push(rockraft::raft::types::UpsertKV::insert(
-        sub_key_str,
-        &field_value.serialize(),
-      ));
+      entries.push(UpsertKV::insert(sub_key_str, &field_value.serialize()));
 
       // Update metadata if this is a new field
       if !field_exists {
@@ -136,10 +135,7 @@ impl Command for HSetCommand {
     }
 
     // Add metadata entry
-    entries.push(rockraft::raft::types::UpsertKV::insert(
-      args.key.clone(),
-      &metadata.serialize(),
-    ));
+    entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
     // Perform atomic batch write
     if let Err(e) = server.batch_write(entries).await {

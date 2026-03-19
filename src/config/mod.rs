@@ -1,6 +1,8 @@
+use std::error::Error;
+use std::fs;
+
 use rockraft::config::Config as RockraftConfig;
 use serde::{Deserialize, Serialize};
-use std::fs;
 
 /// Log configuration
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -46,7 +48,7 @@ fn default_server_addr() -> String {
 
 impl Config {
   /// Load configuration from TOML file
-  pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+  pub fn from_file(path: &str) -> Result<Self, Box<dyn Error>> {
     let config_str = fs::read_to_string(path)
       .map_err(|e| format!("Failed to read config file '{}': {}", path, e))?;
 

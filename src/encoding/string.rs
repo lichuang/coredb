@@ -30,6 +30,9 @@
 //! For `SET key value` without TTL:
 //! - expires_at = NO_EXPIRATION (0)
 
+use std::error::Error;
+use std::fmt::{Display, Formatter, Result as FmtResult};
+
 use serde::{Deserialize, Serialize};
 
 use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
@@ -95,15 +98,15 @@ pub enum DecodeError {
   InvalidData,
 }
 
-impl std::fmt::Display for DecodeError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for DecodeError {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     match self {
       DecodeError::InvalidData => write!(f, "invalid data for decoding"),
     }
   }
 }
 
-impl std::error::Error for DecodeError {}
+impl Error for DecodeError {}
 
 #[cfg(test)]
 mod tests {

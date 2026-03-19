@@ -6,7 +6,10 @@ mod server;
 mod util;
 
 use std::env;
+use std::io::Result;
+use std::process::exit;
 use std::sync::Arc;
+
 use tokio::signal;
 use tracing::{error, info};
 
@@ -14,7 +17,7 @@ use config::Config;
 use server::Server;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
   // Initialize logging
   tracing_subscriber::fmt()
     .with_env_filter(
@@ -35,7 +38,7 @@ async fn main() -> std::io::Result<()> {
   } else {
     eprintln!("Usage: {} --conf <config-file>", args[0]);
     eprintln!("Example: {} --conf conf/node1.toml", args[0]);
-    std::process::exit(1);
+    exit(1);
   };
 
   // Load configuration
@@ -43,7 +46,7 @@ async fn main() -> std::io::Result<()> {
     Ok(cfg) => cfg,
     Err(e) => {
       error!("Failed to load configuration: {}", e);
-      std::process::exit(1);
+      exit(1);
     }
   };
 
@@ -64,7 +67,7 @@ async fn main() -> std::io::Result<()> {
     }
     Err(e) => {
       error!("Failed to start server: {}", e);
-      std::process::exit(1);
+      exit(1);
     }
   };
 

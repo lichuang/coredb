@@ -65,6 +65,40 @@ src/
 - **Rust edition**: 2024
 - **Rust version**: 1.91.0 (see `rust-toolchain.toml`)
 
+### Type Import Rules
+
+**DO NOT** use long path references to types directly in code:
+
+```rust
+// ❌ Wrong
+pub fn to_openai_tool(&self) -> async_openai::types::chat::ChatCompletionTools {
+    // ...
+}
+
+// ❌ Wrong
+pub fn process_response(response: async_openai::types::chat::CreateChatCompletionResponse) {
+    // ...
+}
+```
+
+**MUST** use `use` to import types at the top of the file, then use short names:
+
+```rust
+// ✅ Correct
+use async_openai::types::chat::ChatCompletionTools;
+
+pub fn to_openai_tool(&self) -> ChatCompletionTools {
+    // ...
+}
+
+// ✅ Correct
+use async_openai::types::chat::CreateChatCompletionResponse;
+
+pub fn process_response(response: CreateChatCompletionResponse) {
+    // ...
+}
+```
+
 ### Code Patterns
 
 #### Command Implementation Pattern

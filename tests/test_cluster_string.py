@@ -824,6 +824,155 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_mget_single_key(self) -> bool:
+        """Test MGET with a single key."""
+        print("\nTest: MGET single key")
+        
+        test_key = "mget_single_key"
+        test_value = "mget_single_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set the key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # MGET the single key
+        print(f"  MGET '{test_key}'...")
+        try:
+            result = write_node.mget(test_key)
+            if result != [test_value]:
+                print(f"  FAILED: Expected ['{test_value}'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MGET failed - {e}")
+            return False
+        print(f"  Got expected value: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mget_multiple_keys(self) -> bool:
+        """Test MGET with multiple keys."""
+        print("\nTest: MGET multiple keys")
+        
+        keys = ["mget_key1", "mget_key2", "mget_key3"]
+        values = ["mget_value1", "mget_value2", "mget_value3"]
+        
+        write_node = self._get_random_node()
+        
+        # Set multiple keys
+        print(f"  Setting 3 keys...")
+        for key, value in zip(keys, values):
+            write_node.set(key, value)
+        
+        # MGET all keys
+        print(f"  MGET {keys}...")
+        try:
+            result = write_node.mget(*keys)
+            if result != values:
+                print(f"  FAILED: Expected {values}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MGET failed - {e}")
+            return False
+        print(f"  Got expected values: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mget_nonexistent_keys(self) -> bool:
+        """Test MGET with non-existent keys returns None for each."""
+        print("\nTest: MGET non-existent keys")
+        
+        keys = ["mget_nonexistent1", "mget_nonexistent2"]
+        
+        write_node = self._get_random_node()
+        
+        # Make sure keys don't exist
+        for key in keys:
+            write_node.delete(key)
+        
+        # MGET non-existent keys
+        print(f"  MGET {keys}...")
+        try:
+            result = write_node.mget(*keys)
+            if result != [None, None]:
+                print(f"  FAILED: Expected [None, None], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MGET failed - {e}")
+            return False
+        print(f"  Got expected [None, None]: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mget_mixed_keys(self) -> bool:
+        """Test MGET with mix of existing and non-existing keys."""
+        print("\nTest: MGET mixed existing/non-existing keys")
+        
+        existing_keys = ["mget_mixed1", "mget_mixed3"]
+        non_existing_keys = ["mget_mixed2", "mget_mixed4"]
+        all_keys = ["mget_mixed1", "mget_mixed2", "mget_mixed3", "mget_mixed4"]
+        expected = ["value1", None, "value3", None]
+        
+        write_node = self._get_random_node()
+        
+        # Set only some keys
+        print(f"  Setting 2 keys...")
+        write_node.set("mget_mixed1", "value1")
+        write_node.set("mget_mixed3", "value3")
+        
+        # Make sure non-existing keys don't exist
+        for key in non_existing_keys:
+            write_node.delete(key)
+        
+        # MGET mix of keys
+        print(f"  MGET {all_keys}...")
+        try:
+            result = write_node.mget(*all_keys)
+            if result != expected:
+                print(f"  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: MGET failed - {e}")
+            return False
+        print(f"  Got expected mix: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_mget_replication(self) -> bool:
+        """Test that MGET works on all nodes after write."""
+        print("\nTest: MGET replication")
+        
+        keys = ["mget_repl1", "mget_repl2"]
+        values = ["repl_value1", "repl_value2"]
+        
+        write_node = self._get_random_node()
+        
+        # Set keys
+        print(f"  Setting 2 keys...")
+        for key, value in zip(keys, values):
+            write_node.set(key, value)
+        
+        # MGET from all nodes
+        print("  MGET from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.mget(*keys)
+                if result != values:
+                    print(f"    Node {i}: FAILED (expected {values}, got {result})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -905,6 +1054,11 @@ class TestClusterString(TestClusterBase):
             self.test_del_nonexistent_key,
             self.test_del_mixed_keys,
             self.test_del_replication,
+            self.test_mget_single_key,
+            self.test_mget_multiple_keys,
+            self.test_mget_nonexistent_keys,
+            self.test_mget_mixed_keys,
+            self.test_mget_replication,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

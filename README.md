@@ -119,7 +119,7 @@ print(r.get('key'))
 | `SET key value` | Set key-value | ✅ |
 | `SET key value [NX\|XX] [GET] [EX seconds\|PX milliseconds\|EXAT timestamp\|PXAT timestamp\|KEEPTTL]` | Set with options | ✅ |
 | `DEL key [key ...]` | Delete key(s) | ✅ |
-| `MGET key [key ...]` | Get multiple keys | ❌ |
+| `MGET key [key ...]` | Get multiple keys | ✅ |
 | `MSET key value [key value ...]` | Set multiple key-value pairs | ❌ |
 | `INCR key` | Increment key by 1 | ❌ |
 | `INCRBY key increment` | Increment key by value | ❌ |

@@ -2132,6 +2132,229 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_append_new_key(self) -> bool:
+        """Test APPEND on a non-existent key (should create and return length)."""
+        print("\nTest: APPEND on non-existent key")
+        
+        test_key = "append_new_key"
+        test_value = "hello"
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        print(f"  APPEND '{test_key}' '{test_value}' (non-existent key)...")
+        try:
+            result = write_node.append(test_key, test_value)
+            if result != len(test_value):
+                print(f"  FAILED: Expected {len(test_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        print(f"  Result: {result} (OK)")
+        
+        # Verify value was created
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print(f"  Value is '{value}': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_append_existing_key(self) -> bool:
+        """Test APPEND on an existing key."""
+        print("\nTest: APPEND on existing key")
+        
+        test_key = "append_existing_key"
+        initial_value = "hello"
+        append_value = " world"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        print(f"  APPEND '{test_key}' '{append_value}'...")
+        try:
+            result = write_node.append(test_key, append_value)
+            expected_len = len(initial_value) + len(append_value)
+            if result != expected_len:
+                print(f"  FAILED: Expected {expected_len}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        print(f"  Result: {result} (OK)")
+        
+        # Verify value was appended
+        expected_value = initial_value + append_value
+        value = write_node.get(test_key)
+        if value != expected_value:
+            print(f"  FAILED: Expected '{expected_value}', got '{value}'")
+            return False
+        print(f"  Value is '{value}': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_append_empty_string(self) -> bool:
+        """Test APPEND with empty string."""
+        print("\nTest: APPEND with empty string")
+        
+        test_key = "append_empty_key"
+        initial_value = "hello"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        print(f"  APPEND '{test_key}' '' (empty string)...")
+        try:
+            result = write_node.append(test_key, "")
+            if result != len(initial_value):
+                print(f"  FAILED: Expected {len(initial_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        print(f"  Result: {result} (unchanged, OK)")
+        
+        # Verify value is unchanged
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Expected '{initial_value}', got '{value}'")
+            return False
+        print(f"  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_append_wrong_type(self) -> bool:
+        """Test APPEND on hash key (wrong type)."""
+        print("\nTest: APPEND on hash key (wrong type)")
+        
+        test_key = "append_wrong_type_key"
+        write_node = self._get_random_node()
+        
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        print(f"  APPEND '{test_key}' 'data' (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.append(test_key, "data")
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_append_replication(self) -> bool:
+        """Test that APPEND results are replicated to all nodes."""
+        print("\nTest: APPEND replication")
+        
+        test_key = "append_repl_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  APPEND '{test_key}' 'hello' on random node...")
+        try:
+            result = write_node.append(test_key, "hello")
+            if result != 5:
+                print(f"  FAILED: Expected 5, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        
+        print(f"  APPEND '{test_key}' ' world'...")
+        try:
+            result = write_node.append(test_key, " world")
+            if result != 11:
+                print(f"  FAILED: Expected 11, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        
+        print("  Verifying all nodes have value 'hello world'...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != "hello world":
+                    print(f"    Node {i}: FAILED (expected 'hello world', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_append_preserves_expiration(self) -> bool:
+        """Test that APPEND preserves expiration time."""
+        print("\nTest: APPEND preserves expiration")
+        
+        test_key = "append_ttl_key"
+        initial_value = "hello"
+        append_value = " world"
+        write_node = self._get_random_node()
+        
+        # Set with 1 second TTL
+        print(f"  SET '{test_key}' = '{initial_value}' with 1000ms TTL...")
+        write_node.set(test_key, initial_value, px=1000)
+        
+        # Append immediately
+        print(f"  APPEND '{test_key}' '{append_value}'...")
+        try:
+            result = write_node.append(test_key, append_value)
+            if result != len(initial_value + append_value):
+                print(f"  FAILED: Expected {len(initial_value + append_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: APPEND failed - {e}")
+            return False
+        
+        # Verify value was appended
+        value = write_node.get(test_key)
+        if value != initial_value + append_value:
+            print(f"  FAILED: Expected '{initial_value + append_value}', got '{value}'")
+            return False
+        print(f"  Value appended: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration (1.1s)...")
+        time.sleep(1.1)
+        
+        # Verify key expired
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired but got '{value}'")
+            return False
+        print("  Key expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -2263,6 +2486,12 @@ class TestClusterString(TestClusterBase):
             self.test_set_xx_get_existing_key,
             self.test_set_xx_get_new_key,
             self.test_restart_persistence,
+            self.test_append_new_key,
+            self.test_append_existing_key,
+            self.test_append_empty_string,
+            self.test_append_wrong_type,
+            self.test_append_replication,
+            self.test_append_preserves_expiration,
             self.test_chaos_set_get,  # Chaos test enabled
         ]
         

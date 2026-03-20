@@ -5,8 +5,8 @@ use crate::protocol::hash::{
 };
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
-  DecrCommand, DecrbyCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
-  MsetCommand, SetCommand,
+  AppendCommand, DecrCommand, DecrbyCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand,
+  MgetCommand, MsetCommand, SetCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -45,6 +45,7 @@ impl CommandFactory {
     factory.register("PING", PingCommand);
 
     // Register string commands
+    factory.register("APPEND", AppendCommand);
     factory.register("DECR", DecrCommand);
     factory.register("DECRBY", DecrbyCommand);
     factory.register("DEL", DelCommand);
@@ -103,6 +104,7 @@ mod tests {
     let factory = CommandFactory::init();
 
     // Just verify factory is initialized correctly
+    assert!(factory.commands.contains_key("APPEND"));
     assert!(factory.commands.contains_key("PING"));
     assert!(factory.commands.contains_key("DECR"));
     assert!(factory.commands.contains_key("DEL"));

@@ -125,7 +125,7 @@ print(r.get('key'))
 | `INCRBY key increment` | Increment key by value | ✅ |
 | `DECR key` | Decrement key by 1 | ✅ |
 | `DECRBY key decrement` | Decrement key by value | ✅ |
-| `APPEND key value` | Append value to key | ❌ |
+| `APPEND key value` | Append value to key | ✅ |
 | `STRLEN key` | Get string length | ❌ |
 | `GETSET key value` | Get old value and set new value | ❌ |
 | `SETEX key seconds value` | Set with expiration (seconds) | ❌ |

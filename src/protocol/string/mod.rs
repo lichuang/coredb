@@ -2,6 +2,7 @@
 //!
 //! This module provides Redis string commands including GET and SET.
 
+pub mod append;
 pub mod decr;
 pub mod decrby;
 pub mod del;
@@ -12,6 +13,7 @@ pub mod mget;
 pub mod mset;
 pub mod set;
 
+pub use append::AppendCommand;
 pub use decr::DecrCommand;
 pub use decrby::DecrbyCommand;
 pub use del::DelCommand;

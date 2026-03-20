@@ -2357,6 +2357,219 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_strlen_existing_key(self) -> bool:
+        """Test STRLEN on an existing key."""
+        print("\nTest: STRLEN on existing key")
+        
+        test_key = "strlen_existing_key"
+        test_value = "Hello World"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        print(f"  STRLEN '{test_key}'...")
+        try:
+            result = write_node.strlen(test_key)
+            if result != len(test_value):
+                print(f"  FAILED: Expected {len(test_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: {result} (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_nonexistent_key(self) -> bool:
+        """Test STRLEN on a non-existent key (should return 0)."""
+        print("\nTest: STRLEN on non-existent key")
+        
+        test_key = "strlen_nonexistent_key"
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        print(f"  STRLEN '{test_key}' (non-existent)...")
+        try:
+            result = write_node.strlen(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: 0 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_empty_string(self) -> bool:
+        """Test STRLEN on an empty string."""
+        print("\nTest: STRLEN on empty string")
+        
+        test_key = "strlen_empty_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '' (empty string)...")
+        write_node.set(test_key, "")
+        
+        print(f"  STRLEN '{test_key}'...")
+        try:
+            result = write_node.strlen(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: 0 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_binary_data(self) -> bool:
+        """Test STRLEN on binary data."""
+        print("\nTest: STRLEN on binary data")
+        
+        test_key = "strlen_binary_key"
+        # Binary data with null bytes and special characters
+        test_value = b"\x00\x01\x02\xff\xfe\xfd"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = <binary data> ({len(test_value)} bytes)...")
+        write_node.set(test_key, test_value)
+        
+        print(f"  STRLEN '{test_key}'...")
+        try:
+            result = write_node.strlen(test_key)
+            if result != len(test_value):
+                print(f"  FAILED: Expected {len(test_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: {result} (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_unicode(self) -> bool:
+        """Test STRLEN on Unicode strings (counts bytes, not characters)."""
+        print("\nTest: STRLEN on Unicode strings")
+        
+        test_key = "strlen_unicode_key"
+        # UTF-8: each Chinese character is 3 bytes
+        test_value = "你好世界"  # 4 characters, 12 bytes in UTF-8
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '{test_value}' ({len(test_value)} chars, {len(test_value.encode('utf-8'))} bytes)...")
+        write_node.set(test_key, test_value)
+        
+        print(f"  STRLEN '{test_key}'...")
+        try:
+            result = write_node.strlen(test_key)
+            expected_bytes = len(test_value.encode('utf-8'))
+            if result != expected_bytes:
+                print(f"  FAILED: Expected {expected_bytes} bytes, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: {result} bytes (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_large_value(self) -> bool:
+        """Test STRLEN on a large value."""
+        print("\nTest: STRLEN on large value")
+        
+        test_key = "strlen_large_key"
+        # Create a 1MB value
+        test_value = "x" * (1024 * 1024)
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = <1MB value>...")
+        write_node.set(test_key, test_value)
+        
+        print(f"  STRLEN '{test_key}'...")
+        try:
+            result = write_node.strlen(test_key)
+            if result != len(test_value):
+                print(f"  FAILED: Expected {len(test_value)}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: STRLEN failed - {e}")
+            return False
+        print(f"  Result: {result} (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_replication(self) -> bool:
+        """Test that STRLEN works on all nodes after write."""
+        print("\nTest: STRLEN replication")
+        
+        test_key = "strlen_repl_key"
+        test_value = "replicated_value"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '{test_value}' on random node...")
+        write_node.set(test_key, test_value)
+        
+        print("  STRLEN from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.strlen(test_key)
+                if result != len(test_value):
+                    print(f"    Node {i}: FAILED (expected {len(test_value)}, got {result})")
+                    return False
+                print(f"    Node {i}: OK ({result})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_strlen_wrong_type(self) -> bool:
+        """Test STRLEN on hash key (wrong type)."""
+        print("\nTest: STRLEN on hash key (wrong type)")
+        
+        test_key = "strlen_wrong_type_key"
+        write_node = self._get_random_node()
+        
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        print(f"  STRLEN '{test_key}' (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.strlen(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -2494,6 +2707,14 @@ class TestClusterString(TestClusterBase):
             self.test_append_wrong_type,
             self.test_append_replication,
             self.test_append_preserves_expiration,
+            self.test_strlen_existing_key,
+            self.test_strlen_nonexistent_key,
+            self.test_strlen_empty_string,
+            self.test_strlen_binary_data,
+            self.test_strlen_unicode,
+            self.test_strlen_large_value,
+            self.test_strlen_replication,
+            self.test_strlen_wrong_type,
             self.test_chaos_set_get,  # Chaos test enabled
         ]
         

@@ -6,7 +6,7 @@ use crate::protocol::hash::{
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand,
-  MgetCommand, MsetCommand, SetCommand,
+  MgetCommand, MsetCommand, SetCommand, StrlenCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -55,6 +55,7 @@ impl CommandFactory {
     factory.register("MGET", MgetCommand);
     factory.register("MSET", MsetCommand);
     factory.register("SET", SetCommand);
+    factory.register("STRLEN", StrlenCommand);
 
     // Register hash commands
     factory.register("HDEL", HDelCommand);
@@ -114,6 +115,7 @@ mod tests {
     assert!(factory.commands.contains_key("MGET"));
     assert!(factory.commands.contains_key("MSET"));
     assert!(factory.commands.contains_key("SET"));
+    assert!(factory.commands.contains_key("STRLEN"));
     assert!(factory.commands.contains_key("HDEL"));
     assert!(factory.commands.contains_key("HEXISTS"));
     assert!(factory.commands.contains_key("HGET"));

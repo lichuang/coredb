@@ -824,6 +824,214 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_exists_single_key(self) -> bool:
+        """Test EXISTS with a single existing key."""
+        print("\nTest: EXISTS single existing key")
+        
+        test_key = "exists_single_key"
+        test_value = "exists_single_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set the key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # EXISTS should return 1
+        print(f"  EXISTS '{test_key}'...")
+        try:
+            result = write_node.exists(test_key)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 1: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_nonexistent_key(self) -> bool:
+        """Test EXISTS with a non-existent key."""
+        print("\nTest: EXISTS non-existent key")
+        
+        test_key = "exists_nonexistent_key"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # EXISTS should return 0
+        print(f"  EXISTS '{test_key}'...")
+        try:
+            result = write_node.exists(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 0: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_multiple_keys(self) -> bool:
+        """Test EXISTS with multiple keys."""
+        print("\nTest: EXISTS multiple keys")
+        
+        keys = ["exists_multi_key1", "exists_multi_key2", "exists_multi_key3"]
+        
+        write_node = self._get_random_node()
+        
+        # Set all keys
+        print(f"  Setting 3 keys...")
+        for i, key in enumerate(keys):
+            write_node.set(key, f"value{i}")
+        
+        # EXISTS should return 3
+        print(f"  EXISTS {keys}...")
+        try:
+            result = write_node.exists(*keys)
+            if result != 3:
+                print(f"  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 3: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_mixed_keys(self) -> bool:
+        """Test EXISTS with mix of existing and non-existing keys."""
+        print("\nTest: EXISTS mixed existing/non-existing keys")
+        
+        existing_keys = ["exists_mixed1", "exists_mixed3"]
+        non_existing_keys = ["exists_mixed2", "exists_mixed4"]
+        all_keys = existing_keys + non_existing_keys
+        
+        write_node = self._get_random_node()
+        
+        # Set only some keys
+        print(f"  Setting 2 keys...")
+        for key in existing_keys:
+            write_node.set(key, "value")
+        
+        # Make sure non-existing keys don't exist
+        for key in non_existing_keys:
+            write_node.delete(key)
+        
+        # EXISTS should return 2 (only existing keys)
+        print(f"  EXISTS {all_keys}...")
+        try:
+            result = write_node.exists(*all_keys)
+            if result != 2:
+                print(f"  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 2: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_duplicate_keys(self) -> bool:
+        """Test EXISTS with duplicate keys (should count multiple times)."""
+        print("\nTest: EXISTS duplicate keys")
+        
+        test_key = "exists_duplicate_key"
+        
+        write_node = self._get_random_node()
+        
+        # Set the key
+        print(f"  SET '{test_key}'...")
+        write_node.set(test_key, "value")
+        
+        # EXISTS with same key twice should return 2
+        print(f"  EXISTS '{test_key}' '{test_key}' (duplicate)...")
+        try:
+            result = write_node.exists(test_key, test_key)
+            if result != 2:
+                print(f"  FAILED: Expected 2 (duplicate counted twice), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 2 (duplicate counted): OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_after_del(self) -> bool:
+        """Test EXISTS returns 0 after DEL."""
+        print("\nTest: EXISTS after DEL")
+        
+        test_key = "exists_after_del_key"
+        
+        write_node = self._get_random_node()
+        
+        # Set and verify exists
+        print(f"  SET '{test_key}'...")
+        write_node.set(test_key, "value")
+        
+        result = write_node.exists(test_key)
+        if result != 1:
+            print(f"  FAILED: Key should exist before DEL")
+            return False
+        
+        # Delete the key
+        print(f"  DEL '{test_key}'...")
+        write_node.delete(test_key)
+        
+        # EXISTS should return 0
+        print(f"  EXISTS '{test_key}' after DEL...")
+        try:
+            result = write_node.exists(test_key)
+            if result != 0:
+                print(f"  FAILED: Expected 0 after DEL, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXISTS failed - {e}")
+            return False
+        print("  EXISTS returned 0 after DEL: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_exists_replication(self) -> bool:
+        """Test that EXISTS works on all nodes."""
+        print("\nTest: EXISTS replication")
+        
+        test_key = "exists_repl_key"
+        test_value = "exists_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set the key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # EXISTS should return 1 on all nodes
+        print("  EXISTS on all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.exists(test_key)
+                if result != 1:
+                    print(f"    Node {i}: FAILED (expected 1, got {result})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
     def test_mget_single_key(self) -> bool:
         """Test MGET with a single key."""
         print("\nTest: MGET single key")

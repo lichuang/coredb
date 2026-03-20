@@ -2118,16 +2118,18 @@ class TestClusterString(TestClusterBase):
         
         write_node.delete(test_key)
         
-        print(f"  DECRBY '{test_key}' -9223372036854775808 (i64::MIN, negative)...")
+        # Test negative decrement (increment) with value just below overflow
+        # 0 - (-9223372036854775807) = 9223372036854775807 (i64::MAX, valid)
+        print(f"  DECRBY '{test_key}' -9223372036854775807 (i64::MIN + 1, negative)...")
         try:
-            result = write_node.decrby(test_key, -9223372036854775808)
-            if result != 9223372036854775808:
-                print(f"  FAILED: Expected 9223372036854775808, got {result}")
+            result = write_node.decrby(test_key, -9223372036854775807)
+            if result != 9223372036854775807:
+                print(f"  FAILED: Expected 9223372036854775807, got {result}")
                 return False
         except redis.RedisError as e:
             print(f"  FAILED: DECRBY failed - {e}")
             return False
-        print("  Result: 9223372036854775808 (OK)")
+        print("  Result: 9223372036854775807 (OK)")
         
         print("  PASSED")
         return True

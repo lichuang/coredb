@@ -105,6 +105,10 @@ def main():
         return 0
     else:
         print(f"\n⚠️  {failed} test(s) failed!")
+        print("\nFailed test files:")
+        for test_file, result in results.items():
+            if not result:
+                print(f"  - {test_file}")
         return 1
 
 

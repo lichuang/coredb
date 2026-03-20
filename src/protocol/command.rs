@@ -5,7 +5,8 @@ use crate::protocol::hash::{
 };
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
-  DelCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand, MsetCommand, SetCommand,
+  DecrCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand, MsetCommand,
+  SetCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -44,6 +45,7 @@ impl CommandFactory {
     factory.register("PING", PingCommand);
 
     // Register string commands
+    factory.register("DECR", DecrCommand);
     factory.register("DEL", DelCommand);
     factory.register("GET", GetCommand);
     factory.register("INCR", IncrCommand);
@@ -101,9 +103,11 @@ mod tests {
 
     // Just verify factory is initialized correctly
     assert!(factory.commands.contains_key("PING"));
+    assert!(factory.commands.contains_key("DECR"));
     assert!(factory.commands.contains_key("DEL"));
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("INCR"));
+    assert!(factory.commands.contains_key("INCRBY"));
     assert!(factory.commands.contains_key("MGET"));
     assert!(factory.commands.contains_key("MSET"));
     assert!(factory.commands.contains_key("SET"));

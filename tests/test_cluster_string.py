@@ -1528,6 +1528,305 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_decr_basic(self) -> bool:
+        """Test DECR basic operation."""
+        print("\nTest: DECR basic operation")
+        
+        test_key = "decr_basic_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECR '{test_key}' (non-existent key)...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -1:
+                print(f"  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: -1 (OK)")
+        
+        print(f"  DECR '{test_key}' again...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -2:
+                print(f"  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: -2 (OK)")
+        
+        print(f"  SET '{test_key}' = '10'...")
+        try:
+            write_node.set(test_key, "10")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}'...")
+        try:
+            result = write_node.decr(test_key)
+            if result != 9:
+                print(f"  FAILED: Expected 9, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: 9 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_nonexistent_key(self) -> bool:
+        """Test DECR on non-existent key (should start at 0)."""
+        print("\nTest: DECR on non-existent key")
+        
+        test_key = "decr_nonexistent_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECR '{test_key}' (non-existent)...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -1:
+                print(f"  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        
+        value = write_node.get(test_key)
+        if value != "-1":
+            print(f"  FAILED: Expected value '-1', got '{value}'")
+            return False
+        print("  Value is '-1': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_negative_values(self) -> bool:
+        """Test DECR with negative values."""
+        print("\nTest: DECR with negative values")
+        
+        test_key = "decr_negative_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '-5'...")
+        try:
+            write_node.set(test_key, "-5")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}'...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -6:
+                print(f"  FAILED: Expected -6, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: -6 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_zero(self) -> bool:
+        """Test DECR on zero value."""
+        print("\nTest: DECR on zero value")
+        
+        test_key = "decr_zero_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '0'...")
+        try:
+            write_node.set(test_key, "0")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}'...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -1:
+                print(f"  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: -1 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_overflow(self) -> bool:
+        """Test DECR overflow (i64::MIN - 1)."""
+        print("\nTest: DECR overflow")
+        
+        test_key = "decr_overflow_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '-9223372036854775808' (i64::MIN)...")
+        try:
+            write_node.set(test_key, "-9223372036854775808")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}' (should fail with overflow)...")
+        try:
+            result = write_node.decr(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "overflow" not in error_msg:
+                print(f"  FAILED: Expected overflow error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_invalid_value(self) -> bool:
+        """Test DECR on non-integer string value."""
+        print("\nTest: DECR on non-integer string value")
+        
+        test_key = "decr_invalid_string_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = 'not_an_integer'...")
+        try:
+            write_node.set(test_key, "not_an_integer")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}' (should fail)...")
+        try:
+            result = write_node.decr(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "not an integer" not in error_msg and "out of range" not in error_msg:
+                print(f"  FAILED: Expected 'not an integer' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        value = write_node.get(test_key)
+        if value != "not_an_integer":
+            print(f"  FAILED: Value was modified to '{value}', expected 'not_an_integer'")
+            return False
+        print("  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_wrong_type(self) -> bool:
+        """Test DECR on hash key (wrong type)."""
+        print("\nTest: DECR on hash key (wrong type)")
+        
+        test_key = "decr_wrong_type_key"
+        write_node = self._get_random_node()
+        
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}' (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.decr(test_key)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_replication(self) -> bool:
+        """Test that DECR results are replicated to all nodes."""
+        print("\nTest: DECR replication")
+        
+        test_key = "decr_repl_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECR '{test_key}' on random node...")
+        try:
+            result = write_node.decr(test_key)
+            if result != -1:
+                print(f"  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        
+        print("  Verifying all nodes have value '-1'...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != "-1":
+                    print(f"    Node {i}: FAILED (expected '-1', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_decr_large_values(self) -> bool:
+        """Test DECR with large values."""
+        print("\nTest: DECR with large values")
+        
+        test_key = "decr_large_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  SET '{test_key}' = '9223372036854775807' (i64::MAX)...")
+        try:
+            write_node.set(test_key, "9223372036854775807")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECR '{test_key}'...")
+        try:
+            result = write_node.decr(test_key)
+            if result != 9223372036854775806:
+                print(f"  FAILED: Expected 9223372036854775806, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECR failed - {e}")
+            return False
+        print("  Result: 9223372036854775806 (OK)")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -1630,6 +1929,15 @@ class TestClusterString(TestClusterBase):
             self.test_incrby_wrong_type,
             self.test_incrby_replication,
             self.test_incrby_large_values,
+            self.test_decr_basic,
+            self.test_decr_nonexistent_key,
+            self.test_decr_negative_values,
+            self.test_decr_zero,
+            self.test_decr_overflow,
+            self.test_decr_invalid_value,
+            self.test_decr_wrong_type,
+            self.test_decr_replication,
+            self.test_decr_large_values,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

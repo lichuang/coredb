@@ -123,7 +123,7 @@ print(r.get('key'))
 | `MSET key value [key value ...]` | Set multiple key-value pairs | ✅ |
 | `INCR key` | Increment key by 1 | ✅ |
 | `INCRBY key increment` | Increment key by value | ✅ |
-| `DECR key` | Decrement key by 1 | ❌ |
+| `DECR key` | Decrement key by 1 | ✅ |
 | `DECRBY key decrement` | Decrement key by value | ❌ |
 | `APPEND key value` | Append value to key | ❌ |
 | `STRLEN key` | Get string length | ❌ |

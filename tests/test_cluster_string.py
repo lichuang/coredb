@@ -1827,6 +1827,311 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_decrby_basic(self) -> bool:
+        """Test DECRBY basic operation."""
+        print("\nTest: DECRBY basic operation")
+        
+        test_key = "decrby_basic_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECRBY '{test_key}' 10 (non-existent key)...")
+        try:
+            result = write_node.decrby(test_key, 10)
+            if result != -10:
+                print(f"  FAILED: Expected -10, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: -10 (OK)")
+        
+        print(f"  DECRBY '{test_key}' 5...")
+        try:
+            result = write_node.decrby(test_key, 5)
+            if result != -15:
+                print(f"  FAILED: Expected -15, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: -15 (OK)")
+        
+        print(f"  SET '{test_key}' = '100'...")
+        try:
+            write_node.set(test_key, "100")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' 30...")
+        try:
+            result = write_node.decrby(test_key, 30)
+            if result != 70:
+                print(f"  FAILED: Expected 70, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: 70 (OK)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_nonexistent_key(self) -> bool:
+        """Test DECRBY on non-existent key (should start at 0)."""
+        print("\nTest: DECRBY on non-existent key")
+        
+        test_key = "decrby_nonexistent_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECRBY '{test_key}' 5 (non-existent)...")
+        try:
+            result = write_node.decrby(test_key, 5)
+            if result != -5:
+                print(f"  FAILED: Expected -5, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        
+        value = write_node.get(test_key)
+        if value != "-5":
+            print(f"  FAILED: Expected value '-5', got '{value}'")
+            return False
+        print("  Value is '-5': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_negative(self) -> bool:
+        """Test DECRBY with negative decrement (should increment)."""
+        print("\nTest: DECRBY with negative decrement")
+        
+        test_key = "decrby_negative_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '10'...")
+        try:
+            write_node.set(test_key, "10")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' -5 (negative decrement)...")
+        try:
+            result = write_node.decrby(test_key, -5)
+            if result != 15:
+                print(f"  FAILED: Expected 15, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: 15 (OK - negative decrement increments)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_zero(self) -> bool:
+        """Test DECRBY with zero decrement."""
+        print("\nTest: DECRBY with zero decrement")
+        
+        test_key = "decrby_zero_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '42'...")
+        try:
+            write_node.set(test_key, "42")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' 0...")
+        try:
+            result = write_node.decrby(test_key, 0)
+            if result != 42:
+                print(f"  FAILED: Expected 42, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: 42 (OK - unchanged)")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_overflow(self) -> bool:
+        """Test DECRBY overflow."""
+        print("\nTest: DECRBY overflow")
+        
+        test_key = "decrby_overflow_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = '-9223372036854775808' (i64::MIN)...")
+        try:
+            write_node.set(test_key, "-9223372036854775808")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' 1 (should fail with overflow)...")
+        try:
+            result = write_node.decrby(test_key, 1)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "overflow" not in error_msg:
+                print(f"  FAILED: Expected overflow error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_invalid_value(self) -> bool:
+        """Test DECRBY on non-integer string value."""
+        print("\nTest: DECRBY on non-integer string value")
+        
+        test_key = "decrby_invalid_string_key"
+        write_node = self._get_random_node()
+        
+        print(f"  SET '{test_key}' = 'not_a_number'...")
+        try:
+            write_node.set(test_key, "not_a_number")
+        except redis.RedisError as e:
+            print(f"  FAILED: SET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' 5 (should fail)...")
+        try:
+            result = write_node.decrby(test_key, 5)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "not an integer" not in error_msg and "out of range" not in error_msg:
+                print(f"  FAILED: Expected 'not an integer' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        value = write_node.get(test_key)
+        if value != "not_a_number":
+            print(f"  FAILED: Value was modified to '{value}'")
+            return False
+        print("  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_wrong_type(self) -> bool:
+        """Test DECRBY on hash key (wrong type)."""
+        print("\nTest: DECRBY on hash key (wrong type)")
+        
+        test_key = "decrby_wrong_type_key"
+        write_node = self._get_random_node()
+        
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        print(f"  DECRBY '{test_key}' 10 (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.decrby(test_key, 10)
+            print(f"  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_replication(self) -> bool:
+        """Test that DECRBY results are replicated to all nodes."""
+        print("\nTest: DECRBY replication")
+        
+        test_key = "decrby_repl_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECRBY '{test_key}' 7 on random node...")
+        try:
+            result = write_node.decrby(test_key, 7)
+            if result != -7:
+                print(f"  FAILED: Expected -7, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        
+        print("  Verifying all nodes have value '-7'...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != "-7":
+                    print(f"    Node {i}: FAILED (expected '-7', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_decrby_large_values(self) -> bool:
+        """Test DECRBY with large values."""
+        print("\nTest: DECRBY with large values")
+        
+        test_key = "decrby_large_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECRBY '{test_key}' 9223372036854775807 (i64::MAX)...")
+        try:
+            result = write_node.decrby(test_key, 9223372036854775807)
+            if result != -9223372036854775807:
+                print(f"  FAILED: Expected -9223372036854775807, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: -9223372036854775807 (OK)")
+        
+        write_node.delete(test_key)
+        
+        print(f"  DECRBY '{test_key}' -9223372036854775808 (i64::MIN, negative)...")
+        try:
+            result = write_node.decrby(test_key, -9223372036854775808)
+            if result != 9223372036854775808:
+                print(f"  FAILED: Expected 9223372036854775808, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: DECRBY failed - {e}")
+            return False
+        print("  Result: 9223372036854775808 (OK)")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -1938,6 +2243,15 @@ class TestClusterString(TestClusterBase):
             self.test_decr_wrong_type,
             self.test_decr_replication,
             self.test_decr_large_values,
+            self.test_decrby_basic,
+            self.test_decrby_nonexistent_key,
+            self.test_decrby_negative,
+            self.test_decrby_zero,
+            self.test_decrby_overflow,
+            self.test_decrby_invalid_value,
+            self.test_decrby_wrong_type,
+            self.test_decrby_replication,
+            self.test_decrby_large_values,
             self.test_set_nx_new_key,
             self.test_set_nx_existing_key,
             self.test_set_xx_existing_key,

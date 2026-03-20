@@ -5,8 +5,8 @@ use crate::protocol::hash::{
 };
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
-  DecrCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand, MsetCommand,
-  SetCommand,
+  DecrCommand, DecrbyCommand, DelCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
+  MsetCommand, SetCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -46,6 +46,7 @@ impl CommandFactory {
 
     // Register string commands
     factory.register("DECR", DecrCommand);
+    factory.register("DECRBY", DecrbyCommand);
     factory.register("DEL", DelCommand);
     factory.register("GET", GetCommand);
     factory.register("INCR", IncrCommand);

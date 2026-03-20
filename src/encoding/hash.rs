@@ -35,7 +35,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
+use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION, TYPE_HASH};
 
 /// Hash metadata structure for storage
 ///
@@ -57,7 +57,7 @@ impl HashMetadata {
   /// Create a new HashMetadata without expiration
   pub fn new() -> Self {
     Self {
-      flags: CURRENT_VERSION,
+      flags: (CURRENT_VERSION << 4) | TYPE_HASH,
       expires_at: NO_EXPIRATION,
       version: Self::generate_version(),
       size: 0,
@@ -68,7 +68,7 @@ impl HashMetadata {
   #[allow(dead_code)]
   pub fn with_expiration(expires_at: u64) -> Self {
     Self {
-      flags: CURRENT_VERSION,
+      flags: (CURRENT_VERSION << 4) | TYPE_HASH,
       expires_at,
       version: Self::generate_version(),
       size: 0,
@@ -131,6 +131,11 @@ impl HashMetadata {
   #[allow(dead_code)]
   pub fn clear_expiration(&mut self) {
     self.expires_at = NO_EXPIRATION;
+  }
+
+  /// Get the type from flags (low 4 bits)
+  pub fn get_type(&self) -> u8 {
+    self.flags & 0x0F
   }
 }
 
@@ -282,14 +287,26 @@ impl HashFieldValue {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
+  use crate::encoding::{NO_EXPIRATION, TYPE_HASH};
 
   #[test]
   fn test_hash_metadata_new() {
     let meta = HashMetadata::new();
-    assert_eq!(meta.flags, CURRENT_VERSION);
+    assert_eq!(meta.flags, (1 << 4) | TYPE_HASH); // 0x12
     assert_eq!(meta.expires_at, NO_EXPIRATION);
     assert_eq!(meta.size, 0);
+  }
+
+  #[test]
+  fn test_encode_decode_without_expiration() {
+    let meta = HashMetadata::new();
+    let encoded = meta.serialize();
+    let decoded = HashMetadata::deserialize(&encoded).unwrap();
+
+    assert_eq!(meta, decoded);
+    assert_eq!(decoded.flags, (1 << 4) | TYPE_HASH);
+    assert_eq!(decoded.expires_at, NO_EXPIRATION);
+    assert_eq!(decoded.size, 0);
   }
 
   #[test]
@@ -301,7 +318,7 @@ mod tests {
   }
 
   #[test]
-  fn test_encode_decode_without_expiration() {
+  fn test_encode_decode_with_size() {
     let mut meta = HashMetadata::new();
     meta.size = 10;
 
@@ -309,7 +326,7 @@ mod tests {
     let decoded = HashMetadata::deserialize(&encoded).unwrap();
 
     assert_eq!(meta, decoded);
-    assert_eq!(decoded.flags, CURRENT_VERSION);
+    assert_eq!(decoded.flags, (1 << 4) | TYPE_HASH);
     assert_eq!(decoded.expires_at, NO_EXPIRATION);
     assert_eq!(decoded.size, 10);
   }

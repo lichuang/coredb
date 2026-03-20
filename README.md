@@ -170,7 +170,7 @@ print(r.get('key'))
 | `KEYS pattern` | Find keys matching pattern | ❌ |
 | `RENAME key newkey` | Rename key | ❌ |
 | `RENAMENX key newkey` | Rename if newkey not exists | ❌ |
-| `TYPE key` | Get value type | ❌ |
+| `TYPE key` | Get value type | ✅ |
 | `UNLINK key [key ...]` | Delete key(s) asynchronously | ❌ |
 | `FLUSHDB` | Delete all keys in current DB | ❌ |
 | `FLUSHALL` | Delete all keys in all DBs | ❌ |

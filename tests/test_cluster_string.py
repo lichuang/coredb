@@ -2778,6 +2778,196 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_type_string_key(self) -> bool:
+        """Test TYPE command on string key."""
+        print("\nTest: TYPE on string key")
+        
+        test_key = "type_string_key"
+        test_value = "type_string_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set a string key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # TYPE should return "string"
+        print(f"  TYPE '{test_key}'...")
+        try:
+            result = write_node.type(test_key)
+            if result != "string":
+                print(f"  FAILED: Expected 'string', got '{result}'")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: TYPE failed - {e}")
+            return False
+        print(f"  TYPE returned 'string': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_type_hash_key(self) -> bool:
+        """Test TYPE command on hash key."""
+        print("\nTest: TYPE on hash key")
+        
+        test_key = "type_hash_key"
+        
+        write_node = self._get_random_node()
+        
+        # Set a hash key
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # TYPE should return "hash"
+        print(f"  TYPE '{test_key}'...")
+        try:
+            result = write_node.type(test_key)
+            if result != "hash":
+                print(f"  FAILED: Expected 'hash', got '{result}'")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: TYPE failed - {e}")
+            return False
+        print(f"  TYPE returned 'hash': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_type_nonexistent_key(self) -> bool:
+        """Test TYPE command on non-existent key."""
+        print("\nTest: TYPE on non-existent key")
+        
+        test_key = "type_nonexistent_key"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # TYPE should return "none"
+        print(f"  TYPE '{test_key}' (non-existent)...")
+        try:
+            result = write_node.type(test_key)
+            if result != "none":
+                print(f"  FAILED: Expected 'none', got '{result}'")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: TYPE failed - {e}")
+            return False
+        print(f"  TYPE returned 'none': OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_type_after_del(self) -> bool:
+        """Test TYPE returns 'none' after DEL."""
+        print("\nTest: TYPE after DEL")
+        
+        test_key = "type_after_del_key"
+        
+        write_node = self._get_random_node()
+        
+        # Set a string key
+        print(f"  SET '{test_key}'...")
+        write_node.set(test_key, "value")
+        
+        # Verify TYPE returns "string"
+        result = write_node.type(test_key)
+        if result != "string":
+            print(f"  FAILED: Key should have type 'string' before DEL, got '{result}'")
+            return False
+        
+        # Delete the key
+        print(f"  DEL '{test_key}'...")
+        write_node.delete(test_key)
+        
+        # TYPE should return "none"
+        print(f"  TYPE '{test_key}' after DEL...")
+        try:
+            result = write_node.type(test_key)
+            if result != "none":
+                print(f"  FAILED: Expected 'none' after DEL, got '{result}'")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: TYPE failed - {e}")
+            return False
+        print("  TYPE returned 'none' after DEL: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_type_replication(self) -> bool:
+        """Test that TYPE works on all nodes."""
+        print("\nTest: TYPE replication")
+        
+        test_key = "type_repl_key"
+        test_value = "type_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set a string key
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # TYPE should return "string" on all nodes
+        print("  TYPE on all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.type(test_key)
+                if result != "string":
+                    print(f"    Node {i}: FAILED (expected 'string', got '{result}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_type_expired_key(self) -> bool:
+        """Test TYPE on expired key returns 'none'."""
+        print("\nTest: TYPE on expired key")
+        
+        test_key = "type_expired_key"
+        test_value = "will_expire"
+        
+        write_node = self._get_random_node()
+        
+        # SET with 500ms expiration
+        print(f"  SET '{test_key}' with 500ms TTL...")
+        write_node.set(test_key, test_value, px=500)
+        
+        # Verify TYPE returns "string" immediately
+        result = write_node.type(test_key)
+        if result != "string":
+            print(f"  FAILED: Expected 'string' before expiration, got '{result}'")
+            return False
+        print("  TYPE returned 'string' before expiration: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration...")
+        time.sleep(1)
+        
+        # TYPE should return "none" after expiration
+        print(f"  TYPE '{test_key}' after expiration...")
+        try:
+            result = write_node.type(test_key)
+            if result != "none":
+                print(f"  FAILED: Expected 'none' after expiration, got '{result}'")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: TYPE failed - {e}")
+            return False
+        print("  TYPE returned 'none' after expiration: OK")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -2923,6 +3113,12 @@ class TestClusterString(TestClusterBase):
             self.test_strlen_large_value,
             self.test_strlen_replication,
             self.test_strlen_wrong_type,
+            self.test_type_string_key,
+            self.test_type_hash_key,
+            self.test_type_nonexistent_key,
+            self.test_type_after_del,
+            self.test_type_replication,
+            self.test_type_expired_key,
             self.test_chaos_set_get,  # Chaos test enabled
         ]
         

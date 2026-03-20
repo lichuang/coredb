@@ -6,6 +6,7 @@
 pub mod command;
 pub mod connection;
 pub mod hash;
+pub mod key;
 pub mod resp;
 pub mod string;
 

@@ -5,8 +5,6 @@
 pub mod append;
 pub mod decr;
 pub mod decrby;
-pub mod del;
-pub mod exists;
 pub mod get;
 pub mod incr;
 pub mod incrby;
@@ -18,8 +16,6 @@ pub mod strlen;
 pub use append::AppendCommand;
 pub use decr::DecrCommand;
 pub use decrby::DecrbyCommand;
-pub use del::DelCommand;
-pub use exists::ExistsCommand;
 pub use get::GetCommand;
 pub use incr::IncrCommand;
 pub use incrby::IncrbyCommand;

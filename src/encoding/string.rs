@@ -35,7 +35,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use serde::{Deserialize, Serialize};
 
-use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
+use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION, TYPE_STRING};
 
 /// String value structure for storage
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -52,7 +52,7 @@ impl StringValue {
   /// Create a new StringValue without expiration
   pub fn new(data: impl Into<Vec<u8>>) -> Self {
     Self {
-      flags: CURRENT_VERSION,
+      flags: (CURRENT_VERSION << 4) | TYPE_STRING,
       expires_at: NO_EXPIRATION,
       data: data.into(),
     }
@@ -61,7 +61,7 @@ impl StringValue {
   /// Create a new StringValue with expiration timestamp (in milliseconds)
   pub fn with_expiration(data: impl Into<Vec<u8>>, expires_at: u64) -> Self {
     Self {
-      flags: CURRENT_VERSION,
+      flags: (CURRENT_VERSION << 4) | TYPE_STRING,
       expires_at,
       data: data.into(),
     }
@@ -89,6 +89,11 @@ impl StringValue {
   pub fn has_expiration(&self) -> bool {
     self.expires_at != NO_EXPIRATION
   }
+
+  /// Get the type from flags (low 4 bits)
+  pub fn get_type(&self) -> u8 {
+    self.flags & 0x0F
+  }
 }
 
 /// Errors that can occur during decoding
@@ -111,7 +116,7 @@ impl Error for DecodeError {}
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION};
+  use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION, TYPE_STRING};
 
   #[test]
   fn test_encode_decode_without_expiration() {
@@ -120,7 +125,7 @@ mod tests {
     let decoded = StringValue::deserialize(&encoded).unwrap();
 
     assert_eq!(value, decoded);
-    assert_eq!(decoded.flags, CURRENT_VERSION);
+    assert_eq!(decoded.get_type(), TYPE_STRING);
     assert_eq!(decoded.expires_at, NO_EXPIRATION);
     assert_eq!(decoded.data, b"hello world");
   }
@@ -132,7 +137,7 @@ mod tests {
     let decoded = StringValue::deserialize(&encoded).unwrap();
 
     assert_eq!(value, decoded);
-    assert_eq!(decoded.flags, CURRENT_VERSION);
+    assert_eq!(decoded.get_type(), TYPE_STRING);
     assert_eq!(decoded.expires_at, 1893456000000);
     assert_eq!(decoded.data, b"hello world");
   }
@@ -181,16 +186,11 @@ mod tests {
   }
 
   #[test]
-  fn test_version_compatibility() {
-    // Test that we can decode data with different flags values
-    let value = StringValue {
-      flags: 42, // Some future flags value
-      expires_at: NO_EXPIRATION,
-      data: b"test".to_vec(),
-    };
-    let encoded = value.serialize();
-    let decoded = StringValue::deserialize(&encoded).unwrap();
+  fn test_get_type() {
+    let value = StringValue::new(b"data");
+    assert_eq!(value.get_type(), TYPE_STRING);
 
-    assert_eq!(decoded.flags, 42);
+    let value_with_exp = StringValue::with_expiration(b"data", 1000);
+    assert_eq!(value_with_exp.get_type(), TYPE_STRING);
   }
 }

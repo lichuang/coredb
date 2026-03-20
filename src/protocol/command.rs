@@ -3,10 +3,11 @@ use crate::protocol::hash::{
   HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HKeysCommand, HLenCommand,
   HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
 };
+use crate::protocol::key::{DelCommand, ExistsCommand, TypeCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
-  AppendCommand, DecrCommand, DecrbyCommand, DelCommand, ExistsCommand, GetCommand, IncrCommand,
-  IncrbyCommand, MgetCommand, MsetCommand, SetCommand, StrlenCommand,
+  AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
+  MsetCommand, SetCommand, StrlenCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -57,6 +58,7 @@ impl CommandFactory {
     factory.register("MSET", MsetCommand);
     factory.register("SET", SetCommand);
     factory.register("STRLEN", StrlenCommand);
+    factory.register("TYPE", TypeCommand);
 
     // Register hash commands
     factory.register("HDEL", HDelCommand);
@@ -119,6 +121,7 @@ mod tests {
     assert!(factory.commands.contains_key("PING"));
     assert!(factory.commands.contains_key("SET"));
     assert!(factory.commands.contains_key("STRLEN"));
+    assert!(factory.commands.contains_key("TYPE"));
     assert!(factory.commands.contains_key("HDEL"));
     assert!(factory.commands.contains_key("HEXISTS"));
     assert!(factory.commands.contains_key("HGET"));

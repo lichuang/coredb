@@ -2968,6 +2968,221 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_setex_basic(self) -> bool:
+        """Test basic SETEX operation."""
+        print("\nTest: SETEX basic operation")
+        
+        test_key = "setex_basic_key"
+        test_value = "setex_value"
+        
+        write_node = self._get_random_node()
+        
+        # SETEX with 10 seconds expiration
+        print(f"  SETEX '{test_key}' 10 '{test_value}'...")
+        try:
+            result = write_node.setex(test_key, 10, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETEX failed - {e}")
+            return False
+        
+        # Verify value is readable immediately
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print("  Value readable: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setex_expiration(self) -> bool:
+        """Test that SETEX key expires after specified time."""
+        print("\nTest: SETEX expiration")
+        
+        test_key = "setex_exp_key"
+        test_value = "will_expire"
+        
+        write_node = self._get_random_node()
+        
+        # SETEX with 1 second expiration
+        print(f"  SETEX '{test_key}' 1 '{test_value}'...")
+        try:
+            result = write_node.setex(test_key, 1, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETEX failed - {e}")
+            return False
+        
+        # Verify value is readable immediately
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print("  Value readable immediately: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration (1.5s)...")
+        time.sleep(1.5)
+        
+        # Verify key expired
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired but got '{value}'")
+            return False
+        print("  Key expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setex_overwrite(self) -> bool:
+        """Test that SETEX overwrites existing key."""
+        print("\nTest: SETEX overwrites existing key")
+        
+        test_key = "setex_overwrite_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value without expiration
+        print(f"  SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # Verify initial value
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Initial value not set correctly")
+            return False
+        
+        # SETEX to overwrite with expiration
+        print(f"  SETEX '{test_key}' 10 '{new_value}'...")
+        try:
+            result = write_node.setex(test_key, 10, new_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETEX failed - {e}")
+            return False
+        
+        # Verify value was overwritten
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Expected '{new_value}', got '{value}'")
+            return False
+        print("  Value overwritten: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setex_replication(self) -> bool:
+        """Test that SETEX data is replicated to all nodes."""
+        print("\nTest: SETEX replication")
+        
+        test_key = "setex_repl_key"
+        test_value = "setex_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # SETEX on random node
+        print(f"  SETEX '{test_key}' 10 '{test_value}' on random node...")
+        try:
+            result = write_node.setex(test_key, 10, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETEX failed - {e}")
+            return False
+        
+        # Verify all nodes have the data
+        print("  Verifying all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != test_value:
+                    print(f"    Node {i}: FAILED (expected '{test_value}', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_setex_equivalent_to_set_ex(self) -> bool:
+        """Test that SETEX is equivalent to SET with EX option."""
+        print("\nTest: SETEX equivalent to SET EX")
+        
+        setex_key = "setex_eq_key"
+        set_key = "set_ex_eq_key"
+        test_value = "test_value"
+        
+        write_node = self._get_random_node()
+        
+        # SETEX
+        print(f"  SETEX '{setex_key}' 10 '{test_value}'...")
+        try:
+            result = write_node.setex(setex_key, 10, test_value)
+            if result is not True:
+                print(f"  FAILED: SETEX failed")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETEX failed - {e}")
+            return False
+        
+        # SET with EX
+        print(f"  SET '{set_key}' '{test_value}' EX 10...")
+        try:
+            result = write_node.set(set_key, test_value, ex=10)
+            if result is not True:
+                print(f"  FAILED: SET EX failed")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET EX failed - {e}")
+            return False
+        
+        # Both should have same value
+        setex_value = write_node.get(setex_key)
+        set_value = write_node.get(set_key)
+        
+        if setex_value != set_value:
+            print(f"  FAILED: Values differ - SETEX: '{setex_value}', SET EX: '{set_value}'")
+            return False
+        print("  Both commands set same value: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setex_wrong_args(self) -> bool:
+        """Test SETEX with wrong number of arguments."""
+        print("\nTest: SETEX wrong arguments")
+        
+        write_node = self._get_random_node()
+        
+        # Too few arguments
+        print("  Testing with too few arguments...")
+        try:
+            # Use execute_command to bypass redis-py validation
+            write_node.execute_command("SETEX", "key1")
+            print("  FAILED: Expected error for too few arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -3044,6 +3259,12 @@ class TestClusterString(TestClusterBase):
             self.test_set_and_get,
             self.test_set_with_expiration,
             self.test_set_with_keepttl,
+            self.test_setex_basic,
+            self.test_setex_expiration,
+            self.test_setex_overwrite,
+            self.test_setex_replication,
+            self.test_setex_equivalent_to_set_ex,
+            self.test_setex_wrong_args,
             self.test_del_single_key,
             self.test_del_multiple_keys,
             self.test_del_nonexistent_key,

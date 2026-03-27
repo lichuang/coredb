@@ -7,7 +7,7 @@ use crate::protocol::key::{DelCommand, ExistsCommand, TypeCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
-  MsetCommand, PsetexCommand, SetCommand, SetexCommand, StrlenCommand,
+  MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
 };
 use crate::server::Server;
 use async_trait::async_trait;
@@ -59,6 +59,7 @@ impl CommandFactory {
     factory.register("PSETEX", PsetexCommand);
     factory.register("SET", SetCommand);
     factory.register("SETEX", SetexCommand);
+    factory.register("SETNX", SetnxCommand);
     factory.register("STRLEN", StrlenCommand);
     factory.register("TYPE", TypeCommand);
 

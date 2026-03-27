@@ -130,7 +130,7 @@ print(r.get('key'))
 | `GETSET key value` | Get old value and set new value | ❌ |
 | `SETEX key seconds value` | Set with expiration (seconds) | ✅ |
 | `PSETEX key milliseconds value` | Set with expiration (ms) | ✅ |
-| `SETNX key value` | Set if key not exists | ❌ |
+| `SETNX key value` | Set if key not exists | ✅ |
 
 ### Hash Commands
 

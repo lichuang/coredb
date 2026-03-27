@@ -3398,6 +3398,193 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_setnx_new_key(self) -> bool:
+        """Test SETNX on a new key (should return 1)."""
+        print("\nTest: SETNX on new key")
+        
+        test_key = "setnx_new_key"
+        test_value = "setnx_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SETNX on new key should return 1 (success)
+        print(f"  SETNX '{test_key}' = '{test_value}'...")
+        try:
+            result = write_node.setnx(test_key, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETNX failed - {e}")
+            return False
+        
+        # Verify value was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not set, got '{value}'")
+            return False
+        print("  Key set successfully: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setnx_existing_key(self) -> bool:
+        """Test SETNX on existing key (should return 0)."""
+        print("\nTest: SETNX on existing key")
+        
+        test_key = "setnx_existing_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # First set the key
+        print(f"  Initial SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # Verify initial value is readable
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Initial value not readable")
+            return False
+        
+        # SETNX on existing key should return 0 (not set)
+        print(f"  SETNX '{test_key}' = '{new_value}'...")
+        try:
+            result = write_node.setnx(test_key, new_value)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETNX failed - {e}")
+            return False
+        
+        # Verify value was NOT changed
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Value was changed to '{value}', expected '{initial_value}'")
+            return False
+        print("  Value unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setnx_replication(self) -> bool:
+        """Test that SETNX data is replicated to all nodes."""
+        print("\nTest: SETNX replication")
+        
+        test_key = "setnx_repl_key"
+        test_value = "setnx_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # SETNX on random node
+        print(f"  SETNX '{test_key}' = '{test_value}' on random node...")
+        try:
+            result = write_node.setnx(test_key, test_value)
+            if result != 1:
+                print(f"  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETNX failed - {e}")
+            return False
+        
+        # Verify all nodes have the data
+        print("  Verifying all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != test_value:
+                    print(f"    Node {i}: FAILED (expected '{test_value}', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_setnx_wrong_type(self) -> bool:
+        """Test SETNX on hash key (wrong type) returns 0."""
+        print("\nTest: SETNX on hash key (wrong type)")
+        
+        test_key = "setnx_wrong_type_key"
+        test_value = "setnx_value"
+        
+        write_node = self._get_random_node()
+        
+        # Create a hash key
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HSET failed - {e}")
+            return False
+        
+        # SETNX on hash key should return 0 (key exists)
+        print(f"  SETNX '{test_key}' = '{test_value}'...")
+        try:
+            result = write_node.setnx(test_key, test_value)
+            if result != 0:
+                print(f"  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SETNX failed - {e}")
+            return False
+        
+        # Verify hash was not modified
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_setnx_wrong_args(self) -> bool:
+        """Test SETNX with wrong number of arguments."""
+        print("\nTest: SETNX wrong arguments")
+        
+        write_node = self._get_random_node()
+        
+        # Too few arguments
+        print("  Testing with too few arguments...")
+        try:
+            # Use execute_command to bypass redis-py validation
+            write_node.execute_command("SETNX", "key1")
+            print("  FAILED: Expected error for too few arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        # Too many arguments
+        print("  Testing with too many arguments...")
+        try:
+            write_node.execute_command("SETNX", "key1", "value1", "extra")
+            print("  FAILED: Expected error for too many arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -3486,6 +3673,11 @@ class TestClusterString(TestClusterBase):
             self.test_psetex_replication,
             self.test_psetex_equivalent_to_set_px,
             self.test_psetex_wrong_args,
+            self.test_setnx_new_key,
+            self.test_setnx_existing_key,
+            self.test_setnx_replication,
+            self.test_setnx_wrong_type,
+            self.test_setnx_wrong_args,
             self.test_del_single_key,
             self.test_del_multiple_keys,
             self.test_del_nonexistent_key,

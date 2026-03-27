@@ -13,6 +13,7 @@ pub mod mset;
 pub mod psetex;
 pub mod set;
 pub mod setex;
+pub mod setnx;
 pub mod strlen;
 
 pub use append::AppendCommand;
@@ -26,4 +27,5 @@ pub use mset::MsetCommand;
 pub use psetex::PsetexCommand;
 pub use set::SetCommand;
 pub use setex::SetexCommand;
+pub use setnx::SetnxCommand;
 pub use strlen::StrlenCommand;

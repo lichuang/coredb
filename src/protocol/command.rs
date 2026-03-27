@@ -1,7 +1,7 @@
 use crate::protocol::connection::PingCommand;
 use crate::protocol::hash::{
-  HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HKeysCommand, HLenCommand,
-  HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
+  HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HIncrByCommand, HKeysCommand,
+  HLenCommand, HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
 };
 use crate::protocol::key::{DelCommand, ExistsCommand, TypeCommand};
 use crate::protocol::resp::Value;
@@ -68,6 +68,7 @@ impl CommandFactory {
     factory.register("HEXISTS", HExistsCommand);
     factory.register("HGET", HGetCommand);
     factory.register("HGETALL", HGetAllCommand);
+    factory.register("HINCRBY", HIncrByCommand);
     factory.register("HKEYS", HKeysCommand);
     factory.register("HLEN", HLenCommand);
     factory.register("HMGET", HMGetCommand);
@@ -129,6 +130,7 @@ mod tests {
     assert!(factory.commands.contains_key("HEXISTS"));
     assert!(factory.commands.contains_key("HGET"));
     assert!(factory.commands.contains_key("HGETALL"));
+    assert!(factory.commands.contains_key("HINCRBY"));
     assert!(factory.commands.contains_key("HKEYS"));
     assert!(factory.commands.contains_key("HLEN"));
     assert!(factory.commands.contains_key("HMGET"));

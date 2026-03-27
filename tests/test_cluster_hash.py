@@ -1424,7 +1424,278 @@ class TestClusterHash(TestClusterBase):
         
         print("  PASSED")
         return True
-    
+
+    def test_hincrby_basic(self) -> bool:
+        """Test basic HINCRBY operation."""
+        print("\nTest: HINCRBY Basic")
+        
+        test_key = "test_hash_hincrby"
+        test_field = "counter"
+        
+        write_node = self._get_random_node()
+        
+        # HINCRBY on non-existent field (starts at 0)
+        print("  HINCRBY on non-existent field (starts at 0)...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 5)
+            if result != 5:
+                print(f"  FAILED: Expected 5, got {result}")
+                return False
+            print(f"    OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # HINCRBY increment existing value
+        print("  HINCRBY increment existing value...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 10)
+            if result != 15:
+                print(f"  FAILED: Expected 15, got {result}")
+                return False
+            print(f"    OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # Verify from all nodes
+        print("  Verify from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.hget(test_key, test_field)
+                if value != "15":
+                    print(f"    Node {i}: FAILED (expected '15', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK (got '{value}')")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_negative(self) -> bool:
+        """Test HINCRBY with negative increment (decrement)."""
+        print("\nTest: HINCRBY Negative Increment")
+        
+        test_key = "test_hash_hincrby_neg"
+        test_field = "counter"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value
+        write_node.hset(test_key, test_field, "20")
+        
+        # HINCRBY with negative value
+        print("  HINCRBY with -5...")
+        try:
+            result = write_node.hincrby(test_key, test_field, -5)
+            if result != 15:
+                print(f"  FAILED: Expected 15, got {result}")
+                return False
+            print(f"    OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # HINCRBY with larger negative value
+        print("  HINCRBY with -20...")
+        try:
+            result = write_node.hincrby(test_key, test_field, -20)
+            if result != -5:
+                print(f"  FAILED: Expected -5, got {result}")
+                return False
+            print(f"    OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_nonexistent_key(self) -> bool:
+        """Test HINCRBY on non-existent key creates hash."""
+        print("\nTest: HINCRBY Non-existent Key")
+        
+        test_key = "test_hash_hincrby_new_key"
+        test_field = "counter"
+        
+        write_node = self._get_random_node()
+        
+        # HINCRBY on non-existent key should create hash and field
+        print("  HINCRBY on non-existent key...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 100)
+            if result != 100:
+                print(f"  FAILED: Expected 100, got {result}")
+                return False
+            print(f"    OK: Got {result}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # Verify field exists
+        try:
+            value = write_node.hget(test_key, test_field)
+            if value != "100":
+                print(f"  FAILED: Expected '100', got '{value}'")
+                return False
+            print("  OK: Field exists with correct value")
+        except redis.RedisError as e:
+            print(f"  FAILED: HGET failed - {e}")
+            return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_non_integer_value(self) -> bool:
+        """Test HINCRBY on non-integer value returns error."""
+        print("\nTest: HINCRBY Non-integer Value")
+        
+        test_key = "test_hash_hincrby_non_int"
+        test_field = "non_int_field"
+        
+        write_node = self._get_random_node()
+        
+        # Set a non-integer value
+        write_node.hset(test_key, test_field, "not_a_number")
+        
+        # HINCRBY on non-integer should fail
+        print("  HINCRBY on non-integer value...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 1)
+            print(f"  FAILED: Expected error, got {result}")
+            return False
+        except redis.RedisError as e:
+            if "not an integer" in str(e).lower():
+                print(f"    OK: Got expected error")
+            else:
+                print(f"  FAILED: Got unexpected error - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_overflow(self) -> bool:
+        """Test HINCRBY overflow protection."""
+        print("\nTest: HINCRBY Overflow")
+        
+        test_key = "test_hash_hincrby_overflow"
+        test_field = "big_counter"
+        
+        write_node = self._get_random_node()
+        
+        # Set to max i64
+        write_node.hset(test_key, test_field, "9223372036854775807")
+        
+        # Try to increment (should overflow)
+        print("  HINCRBY that would overflow...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 1)
+            print(f"  FAILED: Expected error, got {result}")
+            return False
+        except redis.RedisError as e:
+            if "overflow" in str(e).lower():
+                print(f"    OK: Got expected overflow error")
+            else:
+                print(f"  FAILED: Got unexpected error - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_replication(self) -> bool:
+        """Test HINCRBY replicates to all nodes."""
+        print("\nTest: HINCRBY Replication")
+        
+        test_key = "test_hash_hincrby_repl"
+        test_field = "counter"
+        
+        write_node = self._get_random_node()
+        
+        # Increment multiple times on one node
+        print("  Multiple HINCRBY on one node...")
+        write_node.hincrby(test_key, test_field, 5)
+        write_node.hincrby(test_key, test_field, 10)
+        write_node.hincrby(test_key, test_field, -3)
+        
+        # Verify from all nodes
+        print("  Verify from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.hget(test_key, test_field)
+                if value != "12":
+                    print(f"    Node {i}: FAILED (expected '12', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK (got '{value}')")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
+    def test_hincrby_atomicity_consistency(self) -> bool:
+        """Test HINCRBY atomicity - field value and metadata updated together."""
+        print("\nTest: HINCRBY Atomicity - Consistency Check")
+        
+        test_key = "test_hash_hincrby_atomicity"
+        test_field = "counter"
+        
+        write_node = self._get_random_node()
+        
+        # First HINCRBY should create field and update metadata
+        print("  First HINCRBY (field does not exist)...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 42)
+            if result != 42:
+                print(f"  FAILED: Expected 42, got {result}")
+                return False
+            
+            hlen = write_node.hlen(test_key)
+            if hlen != 1:
+                print(f"  FAILED: HLEN expected 1 after HINCRBY, got {hlen}")
+                return False
+            print(f"    OK: HINCRBY returned 42, HLEN={hlen}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # Second HINCRBY should update value but not change size
+        print("  Second HINCRBY (field exists)...")
+        try:
+            result = write_node.hincrby(test_key, test_field, 8)
+            if result != 50:
+                print(f"  FAILED: Expected 50, got {result}")
+                return False
+            
+            hlen = write_node.hlen(test_key)
+            if hlen != 1:
+                print(f"  FAILED: HLEN changed to {hlen}, expected 1")
+                return False
+            
+            print(f"    OK: HINCRBY returned 50, HLEN={hlen}")
+        except redis.RedisError as e:
+            print(f"  FAILED: HINCRBY failed - {e}")
+            return False
+        
+        # Verify from all nodes
+        print("  Verify consistency from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.hget(test_key, test_field)
+                hlen = node.conn.hlen(test_key)
+                if value != "50" or hlen != 1:
+                    print(f"    Node {i}: FAILED (value='{value}', HLEN={hlen})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - HSET/HGET with one node down + recovery verification")
@@ -1539,6 +1810,13 @@ class TestClusterHash(TestClusterBase):
             self.test_hmget_partial_fields,
             self.test_hmget_nonexistent_key,
             self.test_hmget_single_field,
+            self.test_hincrby_basic,
+            self.test_hincrby_negative,
+            self.test_hincrby_nonexistent_key,
+            self.test_hincrby_non_integer_value,
+            self.test_hincrby_overflow,
+            self.test_hincrby_replication,
+            self.test_hincrby_atomicity_consistency,
             self.test_chaos_hset_hget,
         ]
         

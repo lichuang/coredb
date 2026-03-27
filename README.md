@@ -146,7 +146,7 @@ print(r.get('key'))
 | `HMGET key field [field ...]` | Get multiple field values | ✅ |
 | `HSETNX key field value` | Set field if not exists | ✅ |
 | `HVALS key` | Get all field values | ✅ |
-| `HINCRBY key field increment` | Increment field value | ❌ |
+| `HINCRBY key field increment` | Increment field value | ✅ |
 
 ### Connection Commands
 

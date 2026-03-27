@@ -3183,6 +3183,221 @@ class TestClusterString(TestClusterBase):
         print("  PASSED")
         return True
     
+    def test_psetex_basic(self) -> bool:
+        """Test basic PSETEX operation."""
+        print("\nTest: PSETEX basic operation")
+        
+        test_key = "psetex_basic_key"
+        test_value = "psetex_value"
+        
+        write_node = self._get_random_node()
+        
+        # PSETEX with 10000 milliseconds (10 seconds) expiration
+        print(f"  PSETEX '{test_key}' 10000 '{test_value}'...")
+        try:
+            result = write_node.psetex(test_key, 10000, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: PSETEX failed - {e}")
+            return False
+        
+        # Verify value is readable immediately
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print("  Value readable: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_psetex_expiration(self) -> bool:
+        """Test that PSETEX key expires after specified time."""
+        print("\nTest: PSETEX expiration")
+        
+        test_key = "psetex_exp_key"
+        test_value = "will_expire"
+        
+        write_node = self._get_random_node()
+        
+        # PSETEX with 500 milliseconds expiration
+        print(f"  PSETEX '{test_key}' 500 '{test_value}'...")
+        try:
+            result = write_node.psetex(test_key, 500, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: PSETEX failed - {e}")
+            return False
+        
+        # Verify value is readable immediately
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print("  Value readable immediately: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration (1s)...")
+        time.sleep(1)
+        
+        # Verify key expired
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired but got '{value}'")
+            return False
+        print("  Key expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_psetex_overwrite(self) -> bool:
+        """Test that PSETEX overwrites existing key."""
+        print("\nTest: PSETEX overwrites existing key")
+        
+        test_key = "psetex_overwrite_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value without expiration
+        print(f"  SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # Verify initial value
+        value = write_node.get(test_key)
+        if value != initial_value:
+            print(f"  FAILED: Initial value not set correctly")
+            return False
+        
+        # PSETEX to overwrite with expiration
+        print(f"  PSETEX '{test_key}' 10000 '{new_value}'...")
+        try:
+            result = write_node.psetex(test_key, 10000, new_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: PSETEX failed - {e}")
+            return False
+        
+        # Verify value was overwritten
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"  FAILED: Expected '{new_value}', got '{value}'")
+            return False
+        print("  Value overwritten: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_psetex_replication(self) -> bool:
+        """Test that PSETEX data is replicated to all nodes."""
+        print("\nTest: PSETEX replication")
+        
+        test_key = "psetex_repl_key"
+        test_value = "psetex_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # PSETEX on random node
+        print(f"  PSETEX '{test_key}' 10000 '{test_value}' on random node...")
+        try:
+            result = write_node.psetex(test_key, 10000, test_value)
+            if result is not True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: PSETEX failed - {e}")
+            return False
+        
+        # Verify all nodes have the data
+        print("  Verifying all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != test_value:
+                    print(f"    Node {i}: FAILED (expected '{test_value}', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_psetex_equivalent_to_set_px(self) -> bool:
+        """Test that PSETEX is equivalent to SET with PX option."""
+        print("\nTest: PSETEX equivalent to SET PX")
+        
+        psetex_key = "psetex_eq_key"
+        set_key = "set_px_eq_key"
+        test_value = "test_value"
+        
+        write_node = self._get_random_node()
+        
+        # PSETEX with 10000ms
+        print(f"  PSETEX '{psetex_key}' 10000 '{test_value}'...")
+        try:
+            result = write_node.psetex(psetex_key, 10000, test_value)
+            if result is not True:
+                print(f"  FAILED: PSETEX failed")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: PSETEX failed - {e}")
+            return False
+        
+        # SET with PX (milliseconds)
+        print(f"  SET '{set_key}' '{test_value}' PX 10000...")
+        try:
+            result = write_node.set(set_key, test_value, px=10000)
+            if result is not True:
+                print(f"  FAILED: SET PX failed")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: SET PX failed - {e}")
+            return False
+        
+        # Both should have same value
+        psetex_value = write_node.get(psetex_key)
+        set_value = write_node.get(set_key)
+        
+        if psetex_value != set_value:
+            print(f"  FAILED: Values differ - PSETEX: '{psetex_value}', SET PX: '{set_value}'")
+            return False
+        print("  Both commands set same value: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_psetex_wrong_args(self) -> bool:
+        """Test PSETEX with wrong number of arguments."""
+        print("\nTest: PSETEX wrong arguments")
+        
+        write_node = self._get_random_node()
+        
+        # Too few arguments
+        print("  Testing with too few arguments...")
+        try:
+            # Use execute_command to bypass redis-py validation
+            write_node.execute_command("PSETEX", "key1")
+            print("  FAILED: Expected error for too few arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("  PASSED")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -3265,6 +3480,12 @@ class TestClusterString(TestClusterBase):
             self.test_setex_replication,
             self.test_setex_equivalent_to_set_ex,
             self.test_setex_wrong_args,
+            self.test_psetex_basic,
+            self.test_psetex_expiration,
+            self.test_psetex_overwrite,
+            self.test_psetex_replication,
+            self.test_psetex_equivalent_to_set_px,
+            self.test_psetex_wrong_args,
             self.test_del_single_key,
             self.test_del_multiple_keys,
             self.test_del_nonexistent_key,

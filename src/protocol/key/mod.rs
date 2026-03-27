@@ -4,8 +4,10 @@
 
 pub mod del;
 pub mod exists;
+pub mod expire;
 pub mod type_;
 
 pub use del::DelCommand;
 pub use exists::ExistsCommand;
+pub use expire::ExpireCommand;
 pub use type_::TypeCommand;

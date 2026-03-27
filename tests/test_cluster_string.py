@@ -3648,6 +3648,438 @@ class TestClusterString(TestClusterBase):
         
         return True
     
+    def test_expire_basic(self) -> bool:
+        """Test EXPIRE sets TTL on an existing key."""
+        print("\nTest: EXPIRE basic")
+        
+        test_key = "expire_basic_key"
+        test_value = "expire_basic_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set a key without expiration
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        # Set expiration to 2 seconds
+        print(f"  EXPIRE '{test_key}' 2...")
+        try:
+            result = write_node.expire(test_key, 2)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE failed - {e}")
+            return False
+        print("  EXPIRE returned True: OK")
+        
+        # Verify key is still readable
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key not readable immediately, got '{value}'")
+            return False
+        print("  Key still readable: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration...")
+        time.sleep(3)
+        
+        # Verify key is expired
+        value = self.nodes[0].conn.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired but got '{value}'")
+            return False
+        print("  Key expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_nonexistent_key(self) -> bool:
+        """Test EXPIRE on non-existent key returns 0."""
+        print("\nTest: EXPIRE non-existent key")
+        
+        test_key = "expire_nonexistent_key"
+        
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+        
+        print(f"  EXPIRE '{test_key}' 60 (non-existent)...")
+        try:
+            result = write_node.expire(test_key, 60)
+            if result != False:
+                print(f"  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE failed - {e}")
+            return False
+        print("  EXPIRE returned False: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_replication(self) -> bool:
+        """Test that EXPIRE replicates to all nodes."""
+        print("\nTest: EXPIRE replication")
+        
+        test_key = "expire_repl_key"
+        test_value = "expire_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set and expire on one node
+        print(f"  SET '{test_key}' = '{test_value}'...")
+        write_node.set(test_key, test_value)
+        
+        print(f"  EXPIRE '{test_key}' 2...")
+        write_node.expire(test_key, 2)
+        
+        # Verify all nodes see the expiration
+        print("  Waiting for expiration...")
+        time.sleep(3)
+        
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value is not None:
+                    print(f"    Node {i}: FAILED (key should have expired)")
+                    return False
+                print(f"    Node {i}: OK (key expired)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_nx_no_existing_ttl(self) -> bool:
+        """Test EXPIRE NX on key without existing TTL (should succeed)."""
+        print("\nTest: EXPIRE NX (no existing TTL)")
+        
+        test_key = "expire_nx_no_ttl_key"
+        test_value = "expire_nx_value"
+        
+        write_node = self._get_random_node()
+        write_node.set(test_key, test_value)
+        
+        print(f"  EXPIRE '{test_key}' 60 NX (no existing TTL)...")
+        try:
+            result = write_node.expire(test_key, 60, nx=True)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE NX failed - {e}")
+            return False
+        print("  EXPIRE NX returned True: OK")
+        
+        # Verify key still readable
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key value changed")
+            return False
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_nx_with_existing_ttl(self) -> bool:
+        """Test EXPIRE NX on key with existing TTL (should fail)."""
+        print("\nTest: EXPIRE NX (with existing TTL)")
+        
+        test_key = "expire_nx_with_ttl_key"
+        test_value = "expire_nx_value"
+        
+        write_node = self._get_random_node()
+        write_node.set(test_key, test_value, px=5000)
+        
+        print(f"  EXPIRE '{test_key}' 60 NX (already has TTL)...")
+        try:
+            result = write_node.expire(test_key, 60, nx=True)
+            if result != False:
+                print(f"  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE NX failed - {e}")
+            return False
+        print("  EXPIRE NX returned False: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_xx_with_existing_ttl(self) -> bool:
+        """Test EXPIRE XX on key with existing TTL (should succeed)."""
+        print("\nTest: EXPIRE XX (with existing TTL)")
+        
+        test_key = "expire_xx_with_ttl_key"
+        test_value = "expire_xx_value"
+        
+        write_node = self._get_random_node()
+        write_node.set(test_key, test_value, px=5000)
+        
+        print(f"  EXPIRE '{test_key}' 60 XX (has TTL)...")
+        try:
+            result = write_node.expire(test_key, 60, xx=True)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE XX failed - {e}")
+            return False
+        print("  EXPIRE XX returned True: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_xx_no_existing_ttl(self) -> bool:
+        """Test EXPIRE XX on key without existing TTL (should fail)."""
+        print("\nTest: EXPIRE XX (no existing TTL)")
+        
+        test_key = "expire_xx_no_ttl_key"
+        test_value = "expire_xx_value"
+        
+        write_node = self._get_random_node()
+        write_node.set(test_key, test_value)
+        
+        print(f"  EXPIRE '{test_key}' 60 XX (no TTL)...")
+        try:
+            result = write_node.expire(test_key, 60, xx=True)
+            if result != False:
+                print(f"  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE XX failed - {e}")
+            return False
+        print("  EXPIRE XX returned False: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_gt_greater(self) -> bool:
+        """Test EXPIRE GT with new TTL greater than current (should succeed)."""
+        print("\nTest: EXPIRE GT (greater)")
+        
+        test_key = "expire_gt_greater_key"
+        test_value = "expire_gt_value"
+        
+        write_node = self._get_random_node()
+        # Set with 1 second TTL
+        write_node.set(test_key, test_value, px=1000)
+        
+        # EXPIRE GT with 100 seconds (much greater)
+        print(f"  EXPIRE '{test_key}' 100 GT (new > current)...")
+        try:
+            result = write_node.expire(test_key, 100, gt=True)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE GT failed - {e}")
+            return False
+        print("  EXPIRE GT returned True: OK")
+        
+        # Key should still be readable after 2 seconds (since TTL was extended)
+        time.sleep(2)
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key expired prematurely")
+            return False
+        print("  Key still readable after 2s (TTL extended): OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_gt_not_greater(self) -> bool:
+        """Test EXPIRE GT with new TTL not greater than current (should fail)."""
+        print("\nTest: EXPIRE GT (not greater)")
+        
+        test_key = "expire_gt_not_greater_key"
+        test_value = "expire_gt_value"
+        
+        write_node = self._get_random_node()
+        # Set with 100 seconds TTL
+        write_node.set(test_key, test_value, px=100000)
+        
+        # EXPIRE GT with 1 second (less than current)
+        print(f"  EXPIRE '{test_key}' 1 GT (new < current)...")
+        try:
+            result = write_node.expire(test_key, 1, gt=True)
+            if result != False:
+                print(f"  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE GT failed - {e}")
+            return False
+        print("  EXPIRE GT returned False: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_lt_less(self) -> bool:
+        """Test EXPIRE LT with new TTL less than current (should succeed)."""
+        print("\nTest: EXPIRE LT (less)")
+        
+        test_key = "expire_lt_less_key"
+        test_value = "expire_lt_value"
+        
+        write_node = self._get_random_node()
+        # Set with 100 seconds TTL
+        write_node.set(test_key, test_value, px=100000)
+        
+        # EXPIRE LT with 1 second (less than current)
+        print(f"  EXPIRE '{test_key}' 1 LT (new < current)...")
+        try:
+            result = write_node.expire(test_key, 1, lt=True)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE LT failed - {e}")
+            return False
+        print("  EXPIRE LT returned True: OK")
+        
+        # Key should expire within 2 seconds
+        time.sleep(2)
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired")
+            return False
+        print("  Key expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_lt_not_less(self) -> bool:
+        """Test EXPIRE LT with new TTL not less than current (should fail)."""
+        print("\nTest: EXPIRE LT (not less)")
+        
+        test_key = "expire_lt_not_less_key"
+        test_value = "expire_lt_value"
+        
+        write_node = self._get_random_node()
+        # Set with 1 second TTL
+        write_node.set(test_key, test_value, px=1000)
+        
+        # EXPIRE LT with 100 seconds (greater than current)
+        print(f"  EXPIRE '{test_key}' 100 LT (new > current)...")
+        try:
+            result = write_node.expire(test_key, 100, lt=True)
+            if result != False:
+                print(f"  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE LT failed - {e}")
+            return False
+        print("  EXPIRE LT returned False: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_on_hash_key(self) -> bool:
+        """Test EXPIRE works on hash keys too."""
+        print("\nTest: EXPIRE on hash key")
+        
+        test_key = "expire_hash_key"
+        
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+        
+        # Create a hash
+        print(f"  HSET '{test_key}' field value...")
+        write_node.hset(test_key, "field", "value")
+        
+        # Set expiration
+        print(f"  EXPIRE '{test_key}' 2...")
+        try:
+            result = write_node.expire(test_key, 2)
+            if result != True:
+                print(f"  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"  FAILED: EXPIRE on hash failed - {e}")
+            return False
+        print("  EXPIRE returned True: OK")
+        
+        # Verify hash is still readable
+        value = write_node.hget(test_key, "field")
+        if value != "value":
+            print(f"  FAILED: Hash field not readable")
+            return False
+        print("  Hash still readable: OK")
+        
+        # Wait for expiration
+        print("  Waiting for expiration...")
+        time.sleep(3)
+        
+        # Verify hash is expired
+        value = write_node.hget(test_key, "field")
+        if value is not None:
+            print(f"  FAILED: Hash should have expired")
+            return False
+        print("  Hash expired correctly: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_preserves_value(self) -> bool:
+        """Test EXPIRE does not modify the key's value."""
+        print("\nTest: EXPIRE preserves value")
+        
+        test_key = "expire_preserve_key"
+        test_value = "original_value_12345"
+        
+        write_node = self._get_random_node()
+        write_node.set(test_key, test_value)
+        
+        print(f"  EXPIRE '{test_key}' 60...")
+        write_node.expire(test_key, 60)
+        
+        # Value should be unchanged
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Value changed to '{value}', expected '{test_value}'")
+            return False
+        print("  Value preserved: OK")
+        
+        print("  PASSED")
+        return True
+    
+    def test_expire_update_existing_ttl(self) -> bool:
+        """Test EXPIRE overwrites an existing TTL."""
+        print("\nTest: EXPIRE updates existing TTL")
+        
+        test_key = "expire_update_key"
+        test_value = "expire_update_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set with 1 second TTL
+        print(f"  SET '{test_key}' with 1s TTL...")
+        write_node.set(test_key, test_value, px=1000)
+        
+        # Wait a bit, then extend to 5 seconds
+        time.sleep(0.5)
+        print(f"  EXPIRE '{test_key}' 5 (extend TTL)...")
+        write_node.expire(test_key, 5)
+        
+        # After 2 seconds, key should still exist (original 1s would have expired)
+        time.sleep(2)
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"  FAILED: Key should still exist (TTL was extended)")
+            return False
+        print("  Key still exists after 2s (TTL extended): OK")
+        
+        # Wait for the new TTL to expire
+        print("  Waiting for new TTL to expire...")
+        time.sleep(4)
+        value = write_node.get(test_key)
+        if value is not None:
+            print(f"  FAILED: Key should have expired")
+            return False
+        print("  Key expired with new TTL: OK")
+        
+        print("  PASSED")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -3754,6 +4186,20 @@ class TestClusterString(TestClusterBase):
             self.test_type_replication,
             self.test_type_expired_key,
             self.test_chaos_set_get,  # Chaos test enabled
+            self.test_expire_basic,
+            self.test_expire_nonexistent_key,
+            self.test_expire_replication,
+            self.test_expire_nx_no_existing_ttl,
+            self.test_expire_nx_with_existing_ttl,
+            self.test_expire_xx_with_existing_ttl,
+            self.test_expire_xx_no_existing_ttl,
+            self.test_expire_gt_greater,
+            self.test_expire_gt_not_greater,
+            self.test_expire_lt_less,
+            self.test_expire_lt_not_less,
+            self.test_expire_on_hash_key,
+            self.test_expire_preserves_value,
+            self.test_expire_update_existing_ttl,
         ]
         
         passed = 0

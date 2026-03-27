@@ -3,7 +3,7 @@ use crate::protocol::hash::{
   HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HIncrByCommand, HKeysCommand,
   HLenCommand, HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
 };
-use crate::protocol::key::{DelCommand, ExistsCommand, TypeCommand};
+use crate::protocol::key::{DelCommand, ExistsCommand, ExpireCommand, TypeCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
@@ -51,6 +51,7 @@ impl CommandFactory {
     factory.register("DECRBY", DecrbyCommand);
     factory.register("DEL", DelCommand);
     factory.register("EXISTS", ExistsCommand);
+    factory.register("EXPIRE", ExpireCommand);
     factory.register("GET", GetCommand);
     factory.register("INCR", IncrCommand);
     factory.register("INCRBY", IncrbyCommand);
@@ -117,6 +118,7 @@ mod tests {
     assert!(factory.commands.contains_key("DECRBY"));
     assert!(factory.commands.contains_key("DEL"));
     assert!(factory.commands.contains_key("EXISTS"));
+    assert!(factory.commands.contains_key("EXPIRE"));
     assert!(factory.commands.contains_key("GET"));
     assert!(factory.commands.contains_key("INCR"));
     assert!(factory.commands.contains_key("INCRBY"));

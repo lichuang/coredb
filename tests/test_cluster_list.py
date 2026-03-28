@@ -787,6 +787,202 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_lrange_nonexistent_key(self) -> bool:
+        """Test LRANGE on a non-existent key returns empty list."""
+        print("\nTest: LRANGE non-existent key")
+
+        key = "lrange_nonexistent"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        try:
+            result = write_node.lrange(key, 0, -1)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+
+        print("  LRANGE 0 -1 on non-existent key = []: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrange_full_list(self) -> bool:
+        """Test LRANGE 0 -1 returns entire list."""
+        print("\nTest: LRANGE 0 -1 full list")
+
+        key = "lrange_full"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c", "d", "e")
+
+        try:
+            result = write_node.lrange(key, 0, -1)
+            expected = [b"a", b"b", b"c", b"d", b"e"]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+
+        print("  LRANGE 0 -1 = ['a','b','c','d','e']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrange_partial(self) -> bool:
+        """Test LRANGE with positive and negative indices."""
+        print("\nTest: LRANGE partial ranges")
+
+        key = "lrange_partial"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c", "d", "e")
+
+        try:
+            result = write_node.lrange(key, 1, 3)
+            expected = [b"b", b"c", b"d"]
+            if result != expected:
+                print(f"\033[31m  FAILED: LRANGE 1 3: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE 1 3 = ['b','c','d']: OK")
+
+        try:
+            result = write_node.lrange(key, 0, 0)
+            expected = [b"a"]
+            if result != expected:
+                print(f"\033[31m  FAILED: LRANGE 0 0: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE 0 0 = ['a']: OK")
+
+        try:
+            result = write_node.lrange(key, -3, -1)
+            expected = [b"c", b"d", b"e"]
+            if result != expected:
+                print(f"\033[31m  FAILED: LRANGE -3 -1: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE -3 -1 = ['c','d','e']: OK")
+
+        try:
+            result = write_node.lrange(key, -1, -1)
+            expected = [b"e"]
+            if result != expected:
+                print(f"\033[31m  FAILED: LRANGE -1 -1: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE -1 -1 = ['e']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrange_out_of_range(self) -> bool:
+        """Test LRANGE with out-of-range indices returns empty or clamped list."""
+        print("\nTest: LRANGE out-of-range indices")
+
+        key = "lrange_oor"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        try:
+            result = write_node.lrange(key, 10, 20)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE 10 20 (start > size) = []: OK")
+
+        try:
+            result = write_node.lrange(key, 0, 100)
+            expected = [b"a", b"b", b"c"]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE 0 100 (stop > size, clamped) = ['a','b','c']: OK")
+
+        try:
+            result = write_node.lrange(key, -100, -1)
+            expected = [b"a", b"b", b"c"]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+        print("  LRANGE -100 -1 (start < 0, clamped) = ['a','b','c']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrange_wrong_type(self) -> bool:
+        """Test LRANGE on a key holding wrong type returns WRONGTYPE error."""
+        print("\nTest: LRANGE wrong type error")
+
+        key = "lrange_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  LRANGE on string key '{key}'...")
+        try:
+            write_node.lrange(key, 0, -1)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrange_after_lpush(self) -> bool:
+        """Test LRANGE on list created with LPUSH returns correct order."""
+        print("\nTest: LRANGE after LPUSH")
+
+        key = "lrange_lpush"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.lpush(key, "c", "b", "a")
+
+        try:
+            result = write_node.lrange(key, 0, -1)
+            expected = [b"a", b"b", b"c"]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LRANGE failed - {e}")
+            return False
+
+        print("  LRANGE 0 -1 after LPUSH c b a = ['a','b','c']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all list tests."""
         print("\n" + "=" * 50)
@@ -817,6 +1013,12 @@ class TestClusterList(TestClusterBase):
             self.test_llen_after_push,
             self.test_llen_after_pop,
             self.test_llen_wrong_type,
+            self.test_lrange_nonexistent_key,
+            self.test_lrange_full_list,
+            self.test_lrange_partial,
+            self.test_lrange_out_of_range,
+            self.test_lrange_wrong_type,
+            self.test_lrange_after_lpush,
         ]
 
         passed = 0

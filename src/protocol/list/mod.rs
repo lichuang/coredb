@@ -4,5 +4,7 @@
 //! LLEN, LRANGE, LINDEX, LSET, LREM, and LTRIM.
 
 pub mod lpush;
+pub mod rpush;
 
 pub use lpush::LPushCommand;
+pub use rpush::RPushCommand;

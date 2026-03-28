@@ -243,6 +243,206 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_rpush_single_element(self) -> bool:
+        """Test RPUSH with a single element."""
+        print("\nTest: RPUSH single element")
+
+        key = "rpush_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  RPUSH '{key}' 'hello'...")
+        try:
+            result = write_node.rpush(key, "hello")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  RPUSH returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_multiple_elements(self) -> bool:
+        """Test RPUSH with multiple elements preserves insertion order."""
+        print("\nTest: RPUSH multiple elements (order)")
+
+        key = "rpush_multi"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        # RPUSH mylist a b c => list = [a, b, c]
+        print(f"  RPUSH '{key}' a b c...")
+        try:
+            result = write_node.rpush(key, "a", "b", "c")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  RPUSH returned 3: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_creates_key(self) -> bool:
+        """Test that RPUSH creates the key if it doesn't exist."""
+        print("\nTest: RPUSH creates key")
+
+        key = "rpush_new_key"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  RPUSH '{key}' 'value' on non-existent key...")
+        try:
+            result = write_node.rpush(key, "value")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        try:
+            result = write_node.rpush(key, "value2")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  List created and verified: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_existing_list(self) -> bool:
+        """Test RPUSH appending to an existing list."""
+        print("\nTest: RPUSH to existing list")
+
+        key = "rpush_existing"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "first")
+
+        print(f"  RPUSH '{key}' 'second' 'third'...")
+        try:
+            result = write_node.rpush(key, "second", "third")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  RPUSH returned 3: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_wrong_type(self) -> bool:
+        """Test RPUSH on a key holding wrong type."""
+        print("\nTest: RPUSH wrong type error")
+
+        key = "rpush_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  RPUSH on string key '{key}'...")
+        try:
+            write_node.rpush(key, "element")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_empty_element(self) -> bool:
+        """Test RPUSH with empty string element."""
+        print("\nTest: RPUSH empty element")
+
+        key = "rpush_empty"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  RPUSH '{key}' ''...")
+        try:
+            result = write_node.rpush(key, "")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  RPUSH empty element returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_binary_element(self) -> bool:
+        """Test RPUSH with binary data."""
+        print("\nTest: RPUSH binary element")
+
+        key = "rpush_binary"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        binary_data = bytes(range(256))
+        print(f"  RPUSH '{key}' with 256-byte binary data...")
+        try:
+            result = write_node.rpush(key, binary_data)
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  RPUSH binary element returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpush_after_lpush(self) -> bool:
+        """Test RPUSH after LPUSH produces correct combined list."""
+        print("\nTest: RPUSH after LPUSH")
+
+        key = "rpush_after_lpush"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        # LPUSH x => [x]
+        write_node.lpush(key, "x")
+        # RPUSH a b => [x, a, b]
+        print(f"  LPUSH x, then RPUSH a b...")
+        try:
+            result = write_node.rpush(key, "a", "b")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPUSH failed - {e}")
+            return False
+
+        print("  Combined list length = 3: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all list tests."""
         print("\n" + "=" * 50)
@@ -261,6 +461,14 @@ class TestClusterList(TestClusterBase):
             self.test_lpush_empty_element,
             self.test_lpush_binary_element,
             self.test_lpush_replication,
+            self.test_rpush_single_element,
+            self.test_rpush_multiple_elements,
+            self.test_rpush_creates_key,
+            self.test_rpush_existing_list,
+            self.test_rpush_wrong_type,
+            self.test_rpush_empty_element,
+            self.test_rpush_binary_element,
+            self.test_rpush_after_lpush,
         ]
 
         passed = 0

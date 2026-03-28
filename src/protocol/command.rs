@@ -4,7 +4,7 @@ use crate::protocol::hash::{
   HLenCommand, HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
 };
 use crate::protocol::key::{DelCommand, ExistsCommand, ExpireCommand, PexpireCommand, TypeCommand};
-use crate::protocol::list::{LPushCommand, RPushCommand};
+use crate::protocol::list::{LPopCommand, LPushCommand, RPopCommand, RPushCommand};
 use crate::protocol::resp::Value;
 use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
@@ -80,7 +80,9 @@ impl CommandFactory {
     factory.register("HVALS", HValsCommand);
 
     // Register list commands
+    factory.register("LPOP", LPopCommand);
     factory.register("LPUSH", LPushCommand);
+    factory.register("RPOP", RPopCommand);
     factory.register("RPUSH", RPushCommand);
 
     factory

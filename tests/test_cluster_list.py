@@ -23,16 +23,14 @@ class TestClusterList(TestClusterBase):
     """List command tests."""
 
     def test_lpush_single_element(self) -> bool:
-        """Test LPUSH with a single element."""
-        print("\nTest: LPUSH single element")
+        """Test LPUSH with a single element, then LPOP to verify."""
+        print("\nTest: LPUSH single element + LPOP verify")
 
         key = "lpush_single"
         write_node = self._get_random_node()
 
-        # Clean up
         write_node.delete(key)
 
-        # LPUSH single element
         print(f"  LPUSH '{key}' 'hello'...")
         try:
             result = write_node.lpush(key, "hello")
@@ -44,20 +42,30 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  LPUSH returned 1: OK")
+        print("  LPOP to verify...")
+        try:
+            result = write_node.lpop(key)
+            if result != "hello":
+                print(f"\033[31m  FAILED: LPOP expected 'hello', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LPOP failed - {e}")
+            return False
+
+        print("  LPOP returned 'hello': OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_multiple_elements(self) -> bool:
-        """Test LPUSH with multiple elements."""
-        print("\nTest: LPUSH multiple elements")
+        """Test LPUSH with multiple elements, then LPOP to verify order."""
+        print("\nTest: LPUSH multiple elements + LPOP verify")
 
         key = "lpush_multi"
         write_node = self._get_random_node()
 
-        # Clean up
         write_node.delete(key)
 
-        # LPUSH mylist a b c => list = [c, b, a]
+        # LPUSH a b c => [c, b, a]
         print(f"  LPUSH '{key}' a b c...")
         try:
             result = write_node.lpush(key, "a", "b", "c")
@@ -69,20 +77,31 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  LPUSH returned 3: OK")
+        print("  LPOP 3 to verify order [c, b, a]...")
+        try:
+            results = []
+            for _ in range(3):
+                results.append(write_node.lpop(key))
+            if results != ["c", "b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['c', 'b', 'a'], got {results}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LPOP failed - {e}")
+            return False
+
+        print("  LPOP order ['c', 'b', 'a']: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_creates_key(self) -> bool:
-        """Test that LPUSH creates the key if it doesn't exist."""
-        print("\nTest: LPUSH creates key")
+        """Test that LPUSH creates the key, then LPOP to verify value."""
+        print("\nTest: LPUSH creates key + LPOP verify")
 
         key = "lpush_new_key"
         write_node = self._get_random_node()
 
-        # Make sure key doesn't exist
         write_node.delete(key)
 
-        # LPUSH should create the key
         print(f"  LPUSH '{key}' 'value' on non-existent key...")
         try:
             result = write_node.lpush(key, "value")
@@ -103,22 +122,36 @@ class TestClusterList(TestClusterBase):
             print(f"\033[31m  FAILED: LPUSH failed - {e}")
             return False
 
-        print("  List created and verified: OK")
+        print("  LPOP to verify...")
+        result = write_node.lpop(key)
+        if result != "value2":
+            print(f"\033[31m  FAILED: LPOP expected 'value2', got {result}")
+            return False
+
+        result = write_node.lpop(key)
+        if result != "value":
+            print(f"\033[31m  FAILED: LPOP expected 'value', got {result}")
+            return False
+
+        result = write_node.lpop(key)
+        if result is not None:
+            print(f"\033[31m  FAILED: LPOP expected None (empty), got {result}")
+            return False
+
+        print("  LPOP returned 'value2', 'value', None: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_existing_list(self) -> bool:
-        """Test LPUSH appending to an existing list."""
-        print("\nTest: LPUSH to existing list")
+        """Test LPUSH appending to an existing list, then LPOP to verify order."""
+        print("\nTest: LPUSH to existing list + LPOP verify")
 
         key = "lpush_existing"
         write_node = self._get_random_node()
 
-        # Clean up and create initial list
         write_node.delete(key)
         write_node.lpush(key, "first")
 
-        # LPUSH more elements
         print(f"  LPUSH '{key}' 'second' 'third'...")
         try:
             result = write_node.lpush(key, "second", "third")
@@ -130,23 +163,50 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  LPUSH returned 3: OK")
+        print("  LPOP to verify order [third, second, first]...")
+        result = write_node.lpop(key)
+        if result != "third":
+            print(f"\033[31m  FAILED: LPOP expected 'third', got {result}")
+            return False
+
+        result = write_node.lpop(key)
+        if result != "second":
+            print(f"\033[31m  FAILED: LPOP expected 'second', got {result}")
+            return False
+
+        result = write_node.lpop(key)
+        if result != "first":
+            print(f"\033[31m  FAILED: LPOP expected 'first', got {result}")
+            return False
+
+        print("  LPOP order [third, second, first]: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_wrong_type(self) -> bool:
-        """Test LPUSH on a key holding wrong type."""
-        print("\nTest: LPUSH wrong type error")
+        """Test LPUSH and LPOP on a key holding wrong type."""
+        print("\nTest: LPUSH + LPOP wrong type error")
 
         key = "lpush_wrong_type"
         write_node = self._get_random_node()
 
-        # Set a string key
         write_node.set(key, "string_value")
 
-        # LPUSH should fail with WRONGTYPE
         print(f"  LPUSH on string key '{key}'...")
         try:
             write_node.lpush(key, "element")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print(f"  LPOP on string key '{key}'...")
+        try:
+            write_node.lpop(key)
             print(f"\033[31m  FAILED: Expected WRONGTYPE error")
             return False
         except redis.ResponseError as e:
@@ -160,16 +220,14 @@ class TestClusterList(TestClusterBase):
         return True
 
     def test_lpush_empty_element(self) -> bool:
-        """Test LPUSH with empty string element."""
-        print("\nTest: LPUSH empty element")
+        """Test LPUSH with empty string element, then LPOP to verify."""
+        print("\nTest: LPUSH empty element + LPOP verify")
 
         key = "lpush_empty"
         write_node = self._get_random_node()
 
-        # Clean up
         write_node.delete(key)
 
-        # LPUSH empty string
         print(f"  LPUSH '{key}' ''...")
         try:
             result = write_node.lpush(key, "")
@@ -181,20 +239,29 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  LPUSH empty element returned 1: OK")
+        print("  LPOP to verify...")
+        try:
+            result = write_node.lpop(key)
+            if result != "":
+                print(f"\033[31m  FAILED: LPOP expected '', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LPOP failed - {e}")
+            return False
+
+        print("  LPOP returned empty string: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_binary_element(self) -> bool:
-        """Test LPUSH with binary data."""
-        print("\nTest: LPUSH binary element")
+        """Test LPUSH with binary data, then LPOP to verify."""
+        print("\nTest: LPUSH binary element + LPOP verify")
 
         key = "lpush_binary"
         write_node = self._get_random_node()
 
-        # Clean up
         write_node.delete(key)
 
-        # LPUSH with binary data
         binary_data = bytes(range(256))
         print(f"  LPUSH '{key}' with 256-byte binary data...")
         try:
@@ -207,20 +274,26 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  LPUSH binary element returned 1: OK")
+        print("  LPOP to verify (expect decode error for binary data)...")
+        try:
+            write_node.lpop(key)
+        except UnicodeDecodeError:
+            print("  LPOP raised UnicodeDecodeError (expected for non-UTF-8 binary): OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LPOP failed - {e}")
+            return False
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_lpush_replication(self) -> bool:
-        """Test that LPUSH data replicates to all nodes."""
-        print("\nTest: LPUSH replication")
+        """Test that LPUSH data replicates, then LPOP from all nodes to verify."""
+        print("\nTest: LPUSH replication + LPOP verify")
 
         key = "lpush_repl"
         write_node = self._get_random_node()
 
-        # Clean up
         write_node.delete(key)
 
-        # LPUSH on one node
         print(f"  LPUSH '{key}' 'a' 'b' 'c' on random node...")
         try:
             write_node.lpush(key, "a", "b", "c")
@@ -228,14 +301,14 @@ class TestClusterList(TestClusterBase):
             print(f"\033[31m  FAILED: LPUSH failed - {e}")
             return False
 
-        print("  Verify list exists on all nodes by pushing...")
+        print("  LPOP from all nodes to verify replication...")
         for i, node in enumerate(self.nodes, 1):
             try:
-                result = node.conn.lpush(key, f"node{i}")
-                if result < 1:
-                    print(f"    Node {i}: FAILED (expected >= 1, got {result})")
+                result = node.conn.lpop(key)
+                if result is None:
+                    print(f"    Node {i}: FAILED (got None)")
                     return False
-                print(f"    Node {i}: OK (pushed, list length={result})")
+                print(f"    Node {i}: OK (popped '{result}')")
             except redis.RedisError as e:
                 print(f"    Node {i}: FAILED - {e}")
                 return False
@@ -244,8 +317,8 @@ class TestClusterList(TestClusterBase):
         return True
 
     def test_rpush_single_element(self) -> bool:
-        """Test RPUSH with a single element."""
-        print("\nTest: RPUSH single element")
+        """Test RPUSH with a single element, then RPOP to verify."""
+        print("\nTest: RPUSH single element + RPOP verify")
 
         key = "rpush_single"
         write_node = self._get_random_node()
@@ -263,19 +336,30 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  RPUSH returned 1: OK")
+        print("  RPOP to verify...")
+        try:
+            result = write_node.rpop(key)
+            if result != "hello":
+                print(f"\033[31m  FAILED: RPOP expected 'hello', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPOP failed - {e}")
+            return False
+
+        print("  RPOP returned 'hello': OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_multiple_elements(self) -> bool:
-        """Test RPUSH with multiple elements preserves insertion order."""
-        print("\nTest: RPUSH multiple elements (order)")
+        """Test RPUSH with multiple elements, then RPOP to verify reverse order."""
+        print("\nTest: RPUSH multiple elements + RPOP verify")
 
         key = "rpush_multi"
         write_node = self._get_random_node()
 
         write_node.delete(key)
 
-        # RPUSH mylist a b c => list = [a, b, c]
+        # RPUSH a b c => [a, b, c], RPOP returns c, b, a
         print(f"  RPUSH '{key}' a b c...")
         try:
             result = write_node.rpush(key, "a", "b", "c")
@@ -287,12 +371,25 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  RPUSH returned 3: OK")
+        print("  RPOP 3 to verify reverse order [c, b, a]...")
+        try:
+            results = []
+            for _ in range(3):
+                results.append(write_node.rpop(key))
+            if results != ["c", "b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['c', 'b', 'a'], got {results}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPOP failed - {e}")
+            return False
+
+        print("  RPOP order ['c', 'b', 'a']: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_creates_key(self) -> bool:
-        """Test that RPUSH creates the key if it doesn't exist."""
-        print("\nTest: RPUSH creates key")
+        """Test that RPUSH creates the key, then RPOP to verify value."""
+        print("\nTest: RPUSH creates key + RPOP verify")
 
         key = "rpush_new_key"
         write_node = self._get_random_node()
@@ -319,12 +416,29 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  List created and verified: OK")
+        print("  RPOP to verify...")
+        result = write_node.rpop(key)
+        if result != "value2":
+            print(f"\033[31m  FAILED: RPOP expected 'value2', got {result}")
+            return False
+
+        result = write_node.rpop(key)
+        if result != "value":
+            print(f"\033[31m  FAILED: RPOP expected 'value', got {result}")
+            return False
+
+        result = write_node.rpop(key)
+        if result is not None:
+            print(f"\033[31m  FAILED: RPOP expected None (empty), got {result}")
+            return False
+
+        print("  RPOP returned 'value2', 'value', None: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_existing_list(self) -> bool:
-        """Test RPUSH appending to an existing list."""
-        print("\nTest: RPUSH to existing list")
+        """Test RPUSH appending to an existing list, then RPOP to verify order."""
+        print("\nTest: RPUSH to existing list + RPOP verify")
 
         key = "rpush_existing"
         write_node = self._get_random_node()
@@ -343,12 +457,29 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  RPUSH returned 3: OK")
+        print("  RPOP to verify order [third, second, first]...")
+        result = write_node.rpop(key)
+        if result != "third":
+            print(f"\033[31m  FAILED: RPOP expected 'third', got {result}")
+            return False
+
+        result = write_node.rpop(key)
+        if result != "second":
+            print(f"\033[31m  FAILED: RPOP expected 'second', got {result}")
+            return False
+
+        result = write_node.rpop(key)
+        if result != "first":
+            print(f"\033[31m  FAILED: RPOP expected 'first', got {result}")
+            return False
+
+        print("  RPOP order [third, second, first]: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_wrong_type(self) -> bool:
-        """Test RPUSH on a key holding wrong type."""
-        print("\nTest: RPUSH wrong type error")
+        """Test RPUSH and RPOP on a key holding wrong type."""
+        print("\nTest: RPUSH + RPOP wrong type error")
 
         key = "rpush_wrong_type"
         write_node = self._get_random_node()
@@ -367,12 +498,24 @@ class TestClusterList(TestClusterBase):
                 return False
             print(f"  Got expected WRONGTYPE error: OK")
 
+        print(f"  RPOP on string key '{key}'...")
+        try:
+            write_node.rpop(key)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_empty_element(self) -> bool:
-        """Test RPUSH with empty string element."""
-        print("\nTest: RPUSH empty element")
+        """Test RPUSH with empty string element, then RPOP to verify."""
+        print("\nTest: RPUSH empty element + RPOP verify")
 
         key = "rpush_empty"
         write_node = self._get_random_node()
@@ -390,12 +533,23 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  RPUSH empty element returned 1: OK")
+        print("  RPOP to verify...")
+        try:
+            result = write_node.rpop(key)
+            if result != "":
+                print(f"\033[31m  FAILED: RPOP expected '', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPOP failed - {e}")
+            return False
+
+        print("  RPOP returned empty string: OK")
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_binary_element(self) -> bool:
-        """Test RPUSH with binary data."""
-        print("\nTest: RPUSH binary element")
+        """Test RPUSH with binary data, then RPOP to verify."""
+        print("\nTest: RPUSH binary element + RPOP verify")
 
         key = "rpush_binary"
         write_node = self._get_random_node()
@@ -414,12 +568,20 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  RPUSH binary element returned 1: OK")
+        print("  RPOP to verify (expect decode error for binary data)...")
+        try:
+            write_node.rpop(key)
+        except UnicodeDecodeError:
+            print("  RPOP raised UnicodeDecodeError (expected for non-UTF-8 binary): OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: RPOP failed - {e}")
+            return False
         print("\033[32m  PASSED\033[0m")
         return True
 
     def test_rpush_after_lpush(self) -> bool:
-        """Test RPUSH after LPUSH produces correct combined list."""
-        print("\nTest: RPUSH after LPUSH")
+        """Test RPUSH after LPUSH produces correct list, then LPOP/RPOP to verify."""
+        print("\nTest: RPUSH after LPUSH + LPOP/RPOP verify")
 
         key = "rpush_after_lpush"
         write_node = self._get_random_node()
@@ -440,6 +602,24 @@ class TestClusterList(TestClusterBase):
             return False
 
         print("  Combined list length = 3: OK")
+        print("  LPOP to verify left end...")
+        result = write_node.lpop(key)
+        if result != "x":
+            print(f"\033[31m  FAILED: LPOP expected 'x', got {result}")
+            return False
+
+        print("  RPOP to verify right end...")
+        result = write_node.rpop(key)
+        if result != "b":
+            print(f"\033[31m  FAILED: RPOP expected 'b', got {result}")
+            return False
+
+        result = write_node.rpop(key)
+        if result != "a":
+            print(f"\033[31m  FAILED: RPOP expected 'a', got {result}")
+            return False
+
+        print("  LPOP='x', RPOP='b','a': OK")
         print("\033[32m  PASSED\033[0m")
         return True
 

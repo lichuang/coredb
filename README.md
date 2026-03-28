@@ -163,7 +163,7 @@ print(r.get('key'))
 |---------|-------------|--------|
 | `EXISTS key [key ...]` | Check if key(s) exist | ✅ |
 | `EXPIRE key seconds [NX|XX|GT|LT]` | Set expiration in seconds | ✅ |
-| `PEXPIRE key milliseconds` | Set expiration in ms | ❌ |
+| `PEXPIRE key milliseconds [NX|XX|GT|LT]` | Set expiration in ms | ✅ |
 | `TTL key` | Get remaining TTL | ❌ |
 | `PTTL key` | Get remaining TTL in ms | ❌ |
 | `PERSIST key` | Remove expiration | ❌ |

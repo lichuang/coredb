@@ -43,10 +43,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, test_field, test_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1 (new field), got {result}")
+                print(f"\033[31m  FAILED: Expected return 1 (new field), got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HGET from all nodes
@@ -63,7 +63,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hset_multiple_fields(self) -> bool:
@@ -85,11 +85,11 @@ class TestClusterHash(TestClusterBase):
             result = write_node.hset(test_key, mapping=fields)
             # Should return 3 (number of new fields added)
             if result != 3:
-                print(f"  FAILED: Expected return 3 (3 new fields), got {result}")
+                print(f"\033[31m  FAILED: Expected return 3 (3 new fields), got {result}")
                 return False
             print(f"    HSET returned {result} (new fields)")
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HGET all fields from all nodes
@@ -106,7 +106,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hset_multiple_fields_mixed(self) -> bool:
@@ -129,23 +129,23 @@ class TestClusterHash(TestClusterBase):
             # First update the existing field
             result = write_node.hset(test_key, "existing_field", "updated_value")
             if result != 0:
-                print(f"  FAILED: Expected return 0 for existing field update, got {result}")
+                print(f"\033[31m  FAILED: Expected return 0 for existing field update, got {result}")
                 return False
             
             # Then add new fields one by one to test return values
             result = write_node.hset(test_key, "new_field1", "new1")
             if result != 1:
-                print(f"  FAILED: Expected return 1 for new field, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1 for new field, got {result}")
                 return False
             
             result = write_node.hset(test_key, "new_field2", "new2")
             if result != 1:
-                print(f"  FAILED: Expected return 1 for new field, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1 for new field, got {result}")
                 return False
             
             print(f"    Individual HSET calls succeeded with correct return values")
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # Verify all values
@@ -160,7 +160,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hset_atomicity_batch_consistency(self) -> bool:
@@ -184,11 +184,11 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != len(fields):
-                print(f"  FAILED: Expected return {len(fields)}, got {result}")
+                print(f"\033[31m  FAILED: Expected return {len(fields)}, got {result}")
                 return False
             print(f"    HSET returned {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # Verify from all nodes: check HLEN and all fields
@@ -213,7 +213,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hdel_atomicity_batch_consistency(self) -> bool:
@@ -237,10 +237,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=all_fields)
             if result != len(all_fields):
-                print(f"  FAILED: Setup HSET expected {len(all_fields)}, got {result}")
+                print(f"\033[31m  FAILED: Setup HSET expected {len(all_fields)}, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: Setup HSET failed - {e}")
+            print(f"\033[31m  FAILED: Setup HSET failed - {e}")
             return False
         
         # Record state before HDEL
@@ -252,11 +252,11 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, *fields_to_delete)
             if result != len(fields_to_delete):
-                print(f"  FAILED: HDEL expected {len(fields_to_delete)}, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected {len(fields_to_delete)}, got {result}")
                 return False
             print(f"    HDEL returned {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # Verify from all nodes: check consistency
@@ -288,7 +288,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hsetnx_atomicity_field_creation(self) -> bool:
@@ -308,16 +308,16 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, "field1", "value1")
             if result != 1:
-                print(f"  FAILED: First HSETNX expected 1, got {result}")
+                print(f"\033[31m  FAILED: First HSETNX expected 1, got {result}")
                 return False
             
             hlen = write_node.hlen(test_key)
             if hlen != 1:
-                print(f"  FAILED: HLEN expected 1 after first HSETNX, got {hlen}")
+                print(f"\033[31m  FAILED: HLEN expected 1 after first HSETNX, got {hlen}")
                 return False
             print(f"    OK: HSETNX returned 1, HLEN={hlen}")
         except redis.RedisError as e:
-            print(f"  FAILED: First HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: First HSETNX failed - {e}")
             return False
         
         # Second HSETNX on same field should not change anything
@@ -325,24 +325,24 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, "field1", "new_value")
             if result != 0:
-                print(f"  FAILED: Second HSETNX expected 0, got {result}")
+                print(f"\033[31m  FAILED: Second HSETNX expected 0, got {result}")
                 return False
             
             # Verify value not changed
             value = write_node.hget(test_key, "field1")
             if value != "value1":
-                print(f"  FAILED: Value was changed to '{value}', expected 'value1'")
+                print(f"\033[31m  FAILED: Value was changed to '{value}', expected 'value1'")
                 return False
             
             # Verify HLEN not changed
             hlen = write_node.hlen(test_key)
             if hlen != 1:
-                print(f"  FAILED: HLEN changed to {hlen}, expected 1")
+                print(f"\033[31m  FAILED: HLEN changed to {hlen}, expected 1")
                 return False
             
             print(f"    OK: HSETNX returned 0, value unchanged, HLEN={hlen}")
         except redis.RedisError as e:
-            print(f"  FAILED: Second HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: Second HSETNX failed - {e}")
             return False
         
         # Verify from all nodes
@@ -359,7 +359,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hset_update_existing(self) -> bool:
@@ -377,10 +377,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, test_field, initial_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1 for new field, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1 for new field, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # Second HSET (update existing field)
@@ -388,10 +388,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, test_field, updated_value)
             if result != 0:
-                print(f"  FAILED: Expected return 0 for existing field, got {result}")
+                print(f"\033[31m  FAILED: Expected return 0 for existing field, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # Verify updated value from all nodes
@@ -408,7 +408,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hget_nonexistent(self) -> bool:
@@ -421,11 +421,11 @@ class TestClusterHash(TestClusterBase):
         try:
             value = node.hget("nonexistent_key", "field")
             if value is not None:
-                print(f"  FAILED: Expected nil for non-existent key, got '{value}'")
+                print(f"\033[31m  FAILED: Expected nil for non-existent key, got '{value}'")
                 return False
             print("    Non-existent key: OK (returned nil)")
         except redis.RedisError as e:
-            print(f"  FAILED: HGET failed - {e}")
+            print(f"\033[31m  FAILED: HGET failed - {e}")
             return False
         
         # Test non-existent field on existing hash
@@ -438,14 +438,14 @@ class TestClusterHash(TestClusterBase):
             node.hset(test_key, test_field, test_value)
             value = node.hget(test_key, "nonexistent_field")
             if value is not None:
-                print(f"  FAILED: Expected nil for non-existent field, got '{value}'")
+                print(f"\033[31m  FAILED: Expected nil for non-existent field, got '{value}'")
                 return False
             print("    Non-existent field: OK (returned nil)")
         except redis.RedisError as e:
-            print(f"  FAILED: HGET failed - {e}")
+            print(f"\033[31m  FAILED: HGET failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hgetall_basic(self) -> bool:
@@ -465,10 +465,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != 3:
-                print(f"  FAILED: Expected return 3, got {result}")
+                print(f"\033[31m  FAILED: Expected return 3, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HGETALL from all nodes
@@ -500,7 +500,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hgetall_empty_hash(self) -> bool:
@@ -513,14 +513,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = node.hgetall(test_key)
             if result != {}:
-                print(f"  FAILED: Expected empty dict, got {result}")
+                print(f"\033[31m  FAILED: Expected empty dict, got {result}")
                 return False
             print("  HGETALL on non-existent key returned empty dict: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HGETALL failed - {e}")
+            print(f"\033[31m  FAILED: HGETALL failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hgetall_after_hdel(self) -> bool:
@@ -543,10 +543,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, "field2")
             if result != 1:
-                print(f"  FAILED: HDEL expected 1, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # HGETALL should return remaining fields
@@ -555,14 +555,14 @@ class TestClusterHash(TestClusterBase):
             result = write_node.hgetall(test_key)
             expected = {"field1": "value1", "field3": "value3"}
             if result != expected:
-                print(f"  FAILED: Expected {expected}, got {result}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
             print(f"  HGETALL returned {len(result)} fields: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HGETALL failed - {e}")
+            print(f"\033[31m  FAILED: HGETALL failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
     
     def test_hgetall_after_hset_update(self) -> bool:
@@ -585,17 +585,17 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hgetall(test_key)
             if result.get("field1") != "updated_value":
-                print(f"  FAILED: field1 expected 'updated_value', got '{result.get('field1')}'")
+                print(f"\033[31m  FAILED: field1 expected 'updated_value', got '{result.get('field1')}'")
                 return False
             if result.get("field2") != "value2":
-                print(f"  FAILED: field2 expected 'value2', got '{result.get('field2')}'")
+                print(f"\033[31m  FAILED: field2 expected 'value2', got '{result.get('field2')}'")
                 return False
             print("  HGETALL returned updated values: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HGETALL failed - {e}")
+            print(f"\033[31m  FAILED: HGETALL failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hkeys_basic(self) -> bool:
@@ -615,10 +615,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != 3:
-                print(f"  FAILED: Expected return 3, got {result}")
+                print(f"\033[31m  FAILED: Expected return 3, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HKEYS from all nodes
@@ -648,7 +648,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hkeys_empty_hash(self) -> bool:
@@ -661,14 +661,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = node.hkeys(test_key)
             if result != []:
-                print(f"  FAILED: Expected empty list, got {result}")
+                print(f"\033[31m  FAILED: Expected empty list, got {result}")
                 return False
             print("  HKEYS on non-existent key returned empty list: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HKEYS failed - {e}")
+            print(f"\033[31m  FAILED: HKEYS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hkeys_after_hdel(self) -> bool:
@@ -691,10 +691,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, "field2")
             if result != 1:
-                print(f"  FAILED: HDEL expected 1, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # HKEYS should return remaining fields
@@ -704,14 +704,14 @@ class TestClusterHash(TestClusterBase):
             expected = {"field1", "field3"}
             result_set = set(result)
             if result_set != expected:
-                print(f"  FAILED: Expected {expected}, got {result_set}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result_set}")
                 return False
             print(f"  HKEYS returned {len(result)} fields: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HKEYS failed - {e}")
+            print(f"\033[31m  FAILED: HKEYS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hkeys_after_hset_update(self) -> bool:
@@ -736,14 +736,14 @@ class TestClusterHash(TestClusterBase):
             result_set = set(result)
             expected_set = {"field1", "field2"}
             if result_set != expected_set:
-                print(f"  FAILED: expected {expected_set}, got {result_set}")
+                print(f"\033[31m  FAILED: expected {expected_set}, got {result_set}")
                 return False
             print("  HKEYS returned correct fields: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HKEYS failed - {e}")
+            print(f"\033[31m  FAILED: HKEYS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hlen_basic(self) -> bool:
@@ -763,10 +763,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != 3:
-                print(f"  FAILED: Expected return 3, got {result}")
+                print(f"\033[31m  FAILED: Expected return 3, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HLEN from all nodes
@@ -782,7 +782,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hlen_empty_hash(self) -> bool:
@@ -795,14 +795,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = node.hlen(test_key)
             if result != 0:
-                print(f"  FAILED: Expected 0, got {result}")
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
                 return False
             print("  HLEN on non-existent key returned 0: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HLEN failed - {e}")
+            print(f"\033[31m  FAILED: HLEN failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hlen_after_hdel(self) -> bool:
@@ -825,10 +825,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, "field2")
             if result != 1:
-                print(f"  FAILED: HDEL expected 1, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # HLEN should return 2
@@ -836,14 +836,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hlen(test_key)
             if result != 2:
-                print(f"  FAILED: Expected 2, got {result}")
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
                 return False
             print(f"  HLEN returned {result}: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HLEN failed - {e}")
+            print(f"\033[31m  FAILED: HLEN failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hlen_after_hset_update(self) -> bool:
@@ -866,14 +866,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hlen(test_key)
             if result != 2:
-                print(f"  FAILED: expected 2, got {result}")
+                print(f"\033[31m  FAILED: expected 2, got {result}")
                 return False
             print("  HLEN returned correct count: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HLEN failed - {e}")
+            print(f"\033[31m  FAILED: HLEN failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hmget_basic(self) -> bool:
@@ -893,10 +893,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != 3:
-                print(f"  FAILED: Expected return 3, got {result}")
+                print(f"\033[31m  FAILED: Expected return 3, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HMGET from all nodes
@@ -920,7 +920,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hmget_partial_fields(self) -> bool:
@@ -940,14 +940,14 @@ class TestClusterHash(TestClusterBase):
             result = write_node.hmget(test_key, ["field1", "field2", "field3"])
             expected = ["value1", None, "value3"]
             if result != expected:
-                print(f"  FAILED: Expected {expected}, got {result}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
             print(f"  OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HMGET failed - {e}")
+            print(f"\033[31m  FAILED: HMGET failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hmget_nonexistent_key(self) -> bool:
@@ -961,14 +961,14 @@ class TestClusterHash(TestClusterBase):
             result = node.hmget(test_key, ["field1", "field2", "field3"])
             expected = [None, None, None]
             if result != expected:
-                print(f"  FAILED: Expected {expected}, got {result}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
             print("  HMGET on non-existent key returned [nil, nil, nil]: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HMGET failed - {e}")
+            print(f"\033[31m  FAILED: HMGET failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hmget_single_field(self) -> bool:
@@ -985,14 +985,14 @@ class TestClusterHash(TestClusterBase):
             result = write_node.hmget(test_key, ["field1"])
             expected = ["value1"]
             if result != expected:
-                print(f"  FAILED: Expected {expected}, got {result}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
             print(f"  OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HMGET failed - {e}")
+            print(f"\033[31m  FAILED: HMGET failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hexists_basic(self) -> bool:
@@ -1009,10 +1009,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, test_field, test_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HEXISTS should return 1 for existing field
@@ -1028,7 +1028,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hexists_nonexistent_field(self) -> bool:
@@ -1046,14 +1046,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hexists(test_key, "nonexistent_field")
             if result != 0:
-                print(f"  FAILED: Expected 0, got {result}")
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
                 return False
             print("  OK: HEXISTS returned 0 for non-existent field")
         except redis.RedisError as e:
-            print(f"  FAILED: HEXISTS failed - {e}")
+            print(f"\033[31m  FAILED: HEXISTS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hexists_nonexistent_key(self) -> bool:
@@ -1066,14 +1066,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = node.hexists(test_key, "field1")
             if result != 0:
-                print(f"  FAILED: Expected 0, got {result}")
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
                 return False
             print("  OK: HEXISTS returned 0 for non-existent key")
         except redis.RedisError as e:
-            print(f"  FAILED: HEXISTS failed - {e}")
+            print(f"\033[31m  FAILED: HEXISTS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hexists_after_hdel(self) -> bool:
@@ -1097,10 +1097,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, test_field)
             if result != 1:
-                print(f"  FAILED: HDEL expected 1, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # HEXISTS should now return 0
@@ -1108,14 +1108,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hexists(test_key, test_field)
             if result != 0:
-                print(f"  FAILED: Expected 0 after HDEL, got {result}")
+                print(f"\033[31m  FAILED: Expected 0 after HDEL, got {result}")
                 return False
             print("  OK: HEXISTS returned 0 after HDEL")
         except redis.RedisError as e:
-            print(f"  FAILED: HEXISTS failed - {e}")
+            print(f"\033[31m  FAILED: HEXISTS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hexists_after_hset_update(self) -> bool:
@@ -1138,14 +1138,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hexists(test_key, test_field)
             if result != 1:
-                print(f"  FAILED: Expected 1, got {result}")
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
                 return False
             print("  OK: HEXISTS returned 1 after update")
         except redis.RedisError as e:
-            print(f"  FAILED: HEXISTS failed - {e}")
+            print(f"\033[31m  FAILED: HEXISTS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hsetnx_new_field(self) -> bool:
@@ -1161,20 +1161,20 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1 (field set), got {result}")
+                print(f"\033[31m  FAILED: Expected return 1 (field set), got {result}")
                 return False
             print(f"  OK: HSETNX returned 1")
         except redis.RedisError as e:
-            print(f"  FAILED: HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: HSETNX failed - {e}")
             return False
         
         # Verify the field was set
         value = write_node.hget(test_key, test_field)
         if value != test_value:
-            print(f"  FAILED: Field not set correctly, expected '{test_value}', got '{value}'")
+            print(f"\033[31m  FAILED: Field not set correctly, expected '{test_value}', got '{value}'")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hsetnx_existing_field(self) -> bool:
@@ -1197,20 +1197,20 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, test_field, new_value)
             if result != 0:
-                print(f"  FAILED: Expected return 0 (field exists), got {result}")
+                print(f"\033[31m  FAILED: Expected return 0 (field exists), got {result}")
                 return False
             print(f"  OK: HSETNX returned 0")
         except redis.RedisError as e:
-            print(f"  FAILED: HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: HSETNX failed - {e}")
             return False
         
         # Verify the field was NOT changed
         value = write_node.hget(test_key, test_field)
         if value != initial_value:
-            print(f"  FAILED: Value was changed despite HSETNX! Expected '{initial_value}', got '{value}'")
+            print(f"\033[31m  FAILED: Value was changed despite HSETNX! Expected '{initial_value}', got '{value}'")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hsetnx_replication(self) -> bool:
@@ -1226,10 +1226,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: HSETNX failed - {e}")
             return False
         
         # Verify from all nodes
@@ -1246,7 +1246,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hsetnx_empty_value(self) -> bool:
@@ -1262,19 +1262,19 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hsetnx(test_key, test_field, test_value)
             if result != 1:
-                print(f"  FAILED: Expected return 1, got {result}")
+                print(f"\033[31m  FAILED: Expected return 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSETNX failed - {e}")
+            print(f"\033[31m  FAILED: HSETNX failed - {e}")
             return False
         
         # Verify the empty value was set
         value = write_node.hget(test_key, test_field)
         if value != test_value:
-            print(f"  FAILED: Expected empty string, got '{value}'")
+            print(f"\033[31m  FAILED: Expected empty string, got '{value}'")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hvals_basic(self) -> bool:
@@ -1294,10 +1294,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hset(test_key, mapping=fields)
             if result != 3:
-                print(f"  FAILED: Expected return 3, got {result}")
+                print(f"\033[31m  FAILED: Expected return 3, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HSET failed - {e}")
+            print(f"\033[31m  FAILED: HSET failed - {e}")
             return False
         
         # HVALS from all nodes
@@ -1327,7 +1327,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hvals_empty_hash(self) -> bool:
@@ -1340,14 +1340,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = node.hvals(test_key)
             if result != []:
-                print(f"  FAILED: Expected empty list, got {result}")
+                print(f"\033[31m  FAILED: Expected empty list, got {result}")
                 return False
             print("  HVALS on non-existent key returned empty list: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HVALS failed - {e}")
+            print(f"\033[31m  FAILED: HVALS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hvals_after_hdel(self) -> bool:
@@ -1370,10 +1370,10 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hdel(test_key, "field2")
             if result != 1:
-                print(f"  FAILED: HDEL expected 1, got {result}")
+                print(f"\033[31m  FAILED: HDEL expected 1, got {result}")
                 return False
         except redis.RedisError as e:
-            print(f"  FAILED: HDEL failed - {e}")
+            print(f"\033[31m  FAILED: HDEL failed - {e}")
             return False
         
         # HVALS should return remaining values
@@ -1383,14 +1383,14 @@ class TestClusterHash(TestClusterBase):
             expected = {"value1", "value3"}
             result_set = set(result)
             if result_set != expected:
-                print(f"  FAILED: Expected {expected}, got {result_set}")
+                print(f"\033[31m  FAILED: Expected {expected}, got {result_set}")
                 return False
             print(f"  HVALS returned {len(result)} values: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HVALS failed - {e}")
+            print(f"\033[31m  FAILED: HVALS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hvals_after_hset_update(self) -> bool:
@@ -1415,14 +1415,14 @@ class TestClusterHash(TestClusterBase):
             result_set = set(result)
             expected_set = {"updated_value", "value2"}
             if result_set != expected_set:
-                print(f"  FAILED: expected {expected_set}, got {result_set}")
+                print(f"\033[31m  FAILED: expected {expected_set}, got {result_set}")
                 return False
             print("  HVALS returned correct values: OK")
         except redis.RedisError as e:
-            print(f"  FAILED: HVALS failed - {e}")
+            print(f"\033[31m  FAILED: HVALS failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_basic(self) -> bool:
@@ -1439,11 +1439,11 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, 5)
             if result != 5:
-                print(f"  FAILED: Expected 5, got {result}")
+                print(f"\033[31m  FAILED: Expected 5, got {result}")
                 return False
             print(f"    OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # HINCRBY increment existing value
@@ -1451,11 +1451,11 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, 10)
             if result != 15:
-                print(f"  FAILED: Expected 15, got {result}")
+                print(f"\033[31m  FAILED: Expected 15, got {result}")
                 return False
             print(f"    OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # Verify from all nodes
@@ -1471,7 +1471,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_negative(self) -> bool:
@@ -1491,11 +1491,11 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, -5)
             if result != 15:
-                print(f"  FAILED: Expected 15, got {result}")
+                print(f"\033[31m  FAILED: Expected 15, got {result}")
                 return False
             print(f"    OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # HINCRBY with larger negative value
@@ -1503,14 +1503,14 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, -20)
             if result != -5:
-                print(f"  FAILED: Expected -5, got {result}")
+                print(f"\033[31m  FAILED: Expected -5, got {result}")
                 return False
             print(f"    OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_nonexistent_key(self) -> bool:
@@ -1527,25 +1527,25 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, 100)
             if result != 100:
-                print(f"  FAILED: Expected 100, got {result}")
+                print(f"\033[31m  FAILED: Expected 100, got {result}")
                 return False
             print(f"    OK: Got {result}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # Verify field exists
         try:
             value = write_node.hget(test_key, test_field)
             if value != "100":
-                print(f"  FAILED: Expected '100', got '{value}'")
+                print(f"\033[31m  FAILED: Expected '100', got '{value}'")
                 return False
             print("  OK: Field exists with correct value")
         except redis.RedisError as e:
-            print(f"  FAILED: HGET failed - {e}")
+            print(f"\033[31m  FAILED: HGET failed - {e}")
             return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_non_integer_value(self) -> bool:
@@ -1564,16 +1564,16 @@ class TestClusterHash(TestClusterBase):
         print("  HINCRBY on non-integer value...")
         try:
             result = write_node.hincrby(test_key, test_field, 1)
-            print(f"  FAILED: Expected error, got {result}")
+            print(f"\033[31m  FAILED: Expected error, got {result}")
             return False
         except redis.RedisError as e:
             if "not an integer" in str(e).lower():
                 print(f"    OK: Got expected error")
             else:
-                print(f"  FAILED: Got unexpected error - {e}")
+                print(f"\033[31m  FAILED: Got unexpected error - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_overflow(self) -> bool:
@@ -1592,16 +1592,16 @@ class TestClusterHash(TestClusterBase):
         print("  HINCRBY that would overflow...")
         try:
             result = write_node.hincrby(test_key, test_field, 1)
-            print(f"  FAILED: Expected error, got {result}")
+            print(f"\033[31m  FAILED: Expected error, got {result}")
             return False
         except redis.RedisError as e:
             if "overflow" in str(e).lower():
                 print(f"    OK: Got expected overflow error")
             else:
-                print(f"  FAILED: Got unexpected error - {e}")
+                print(f"\033[31m  FAILED: Got unexpected error - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_replication(self) -> bool:
@@ -1632,7 +1632,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_hincrby_atomicity_consistency(self) -> bool:
@@ -1649,16 +1649,16 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, 42)
             if result != 42:
-                print(f"  FAILED: Expected 42, got {result}")
+                print(f"\033[31m  FAILED: Expected 42, got {result}")
                 return False
             
             hlen = write_node.hlen(test_key)
             if hlen != 1:
-                print(f"  FAILED: HLEN expected 1 after HINCRBY, got {hlen}")
+                print(f"\033[31m  FAILED: HLEN expected 1 after HINCRBY, got {hlen}")
                 return False
             print(f"    OK: HINCRBY returned 42, HLEN={hlen}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # Second HINCRBY should update value but not change size
@@ -1666,17 +1666,17 @@ class TestClusterHash(TestClusterBase):
         try:
             result = write_node.hincrby(test_key, test_field, 8)
             if result != 50:
-                print(f"  FAILED: Expected 50, got {result}")
+                print(f"\033[31m  FAILED: Expected 50, got {result}")
                 return False
             
             hlen = write_node.hlen(test_key)
             if hlen != 1:
-                print(f"  FAILED: HLEN changed to {hlen}, expected 1")
+                print(f"\033[31m  FAILED: HLEN changed to {hlen}, expected 1")
                 return False
             
             print(f"    OK: HINCRBY returned 50, HLEN={hlen}")
         except redis.RedisError as e:
-            print(f"  FAILED: HINCRBY failed - {e}")
+            print(f"\033[31m  FAILED: HINCRBY failed - {e}")
             return False
         
         # Verify from all nodes
@@ -1693,7 +1693,7 @@ class TestClusterHash(TestClusterBase):
                 print(f"    Node {i}: FAILED - {e}")
                 return False
         
-        print("  PASSED")
+        print("\033[32m  PASSED\033[0m")
         return True
 
     def test_chaos_hset_hget(self) -> bool:
@@ -1728,10 +1728,10 @@ class TestClusterHash(TestClusterBase):
             try:
                 result = write_node.conn.hset(test_key, test_field, test_value)
                 if result != 1:
-                    print(f"  FAILED: Expected return 1, got {result}")
+                    print(f"\033[31m  FAILED: Expected return 1, got {result}")
                     return False
             except redis.RedisError as e:
-                print(f"  FAILED: HSET failed - {e}")
+                print(f"\033[31m  FAILED: HSET failed - {e}")
                 return False
             
             # Read from another alive node
@@ -1739,11 +1739,11 @@ class TestClusterHash(TestClusterBase):
             try:
                 value = read_node.conn.hget(test_key, test_field)
                 if value != test_value:
-                    print(f"  FAILED: Expected '{test_value}', got '{value}'")
+                    print(f"\033[31m  FAILED: Expected '{test_value}', got '{value}'")
                     return False
                 print(f"  OK: Read '{value}' from surviving node")
             except redis.RedisError as e:
-                print(f"  FAILED: HGET failed - {e}")
+                print(f"\033[31m  FAILED: HGET failed - {e}")
                 return False
         
         # After context exit, nodes are recovered. Verify killed node has the data.
@@ -1755,10 +1755,10 @@ class TestClusterHash(TestClusterBase):
                     print(f"  OK: Recovered node has '{value}'")
                     return True
                 else:
-                    print(f"  FAILED: Recovered node has '{value}', expected '{test_value}'")
+                    print(f"\033[31m  FAILED: Recovered node has '{value}', expected '{test_value}'")
                     return False
             except redis.RedisError as e:
-                print(f"  FAILED: HGET from recovered node failed - {e}")
+                print(f"\033[31m  FAILED: HGET from recovered node failed - {e}")
                 return False
         
         return True
@@ -1824,13 +1824,14 @@ class TestClusterHash(TestClusterBase):
         failed = 0
         
         for test in tests:
+            print(f"\n\033[36m[running]\033[0m {test.__name__}")
             try:
                 if test():
                     passed += 1
                 else:
                     failed += 1
             except Exception as e:
-                print(f"  EXCEPTION: {e}")
+                print(f"\033[33m  EXCEPTION:\033[0m {e}")
                 import traceback
                 traceback.print_exc()
                 failed += 1

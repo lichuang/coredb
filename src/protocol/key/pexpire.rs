@@ -1,9 +1,10 @@
-//! EXPIRE command implementation
+//! PEXPIRE command implementation
 //!
-//! EXPIRE key seconds [NX | XX | GT | LT]
+//! PEXPIRE key milliseconds [NX | XX | GT | LT]
 //!
-//! Set a timeout on key. After the timeout has expired, the key will
-//! automatically be deleted. Works on any data type (string, hash, etc.).
+//! Set a timeout on key in milliseconds. After the timeout has expired,
+//! the key will automatically be deleted. Works on any data type
+//! (string, hash, etc.).
 //!
 //! Options:
 //! - NX: Only set the expiration if the key has no associated expiration
@@ -17,37 +18,35 @@
 
 use crate::encoding::{HashMetadata, StringValue};
 use crate::protocol::command::Command;
+use crate::protocol::key::expire::{ExpireCondition, KeyState, read_key_state};
 use crate::protocol::resp::Value;
 use crate::server::Server;
 use crate::util::now_ms;
 use async_trait::async_trait;
 
-/// Expire condition flags (NX, XX, GT, LT)
+/// PEXPIRE command parameters
 #[derive(Debug, Clone, PartialEq)]
-pub enum ExpireCondition {
-  /// NX - Only set expiration if key has NO existing expiration
-  Nx,
-  /// XX - Only set expiration if key already HAS an expiration
-  Xx,
-  /// GT - Only set expiration if new TTL is GREATER than current TTL
-  Gt,
-  /// LT - Only set expiration if new TTL is LESS than current TTL
-  Lt,
-}
-
-/// EXPIRE command parameters
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExpireParams {
+pub struct PexpireParams {
   pub key: String,
-  pub seconds: u64,
+  pub milliseconds: i64,
   pub condition: Option<ExpireCondition>,
 }
 
-impl ExpireParams {
-  /// Parse EXPIRE command parameters from RESP array items
-  /// Format: EXPIRE key seconds [NX | XX | GT | LT]
+/// Parse a Value as i64 (supports negative values for PEXPIRE)
+fn parse_i64(value: &Value) -> Option<i64> {
+  match value {
+    Value::BulkString(Some(data)) => String::from_utf8_lossy(data).parse::<i64>().ok(),
+    Value::SimpleString(s) => s.parse::<i64>().ok(),
+    Value::Integer(i) => Some(*i),
+    _ => None,
+  }
+}
+
+impl PexpireParams {
+  /// Parse PEXPIRE command parameters from RESP array items
+  /// Format: PEXPIRE key milliseconds [NX | XX | GT | LT]
   fn parse(items: &[Value]) -> Option<Self> {
-    // Need at least: EXPIRE key seconds (3 items)
+    // Need at least: PEXPIRE key milliseconds (3 items)
     if items.len() < 3 {
       return None;
     }
@@ -58,7 +57,7 @@ impl ExpireParams {
       _ => return None,
     };
 
-    let seconds = parse_u64(&items[2])?;
+    let milliseconds = parse_i64(&items[2])?;
 
     // Parse optional condition flag
     let condition = if items.len() >= 4 {
@@ -73,86 +72,38 @@ impl ExpireParams {
         "XX" => Some(ExpireCondition::Xx),
         "GT" => Some(ExpireCondition::Gt),
         "LT" => Some(ExpireCondition::Lt),
-        _ => return None, // Unknown option
+        _ => return None,
       }
     } else {
       None
     };
 
-    Some(ExpireParams {
+    Some(PexpireParams {
       key,
-      seconds,
+      milliseconds,
       condition,
     })
   }
 }
 
-/// Parse a Value as u64
-fn parse_u64(value: &Value) -> Option<u64> {
-  match value {
-    Value::BulkString(Some(data)) => String::from_utf8_lossy(data).parse::<u64>().ok(),
-    Value::SimpleString(s) => s.parse::<u64>().ok(),
-    Value::Integer(i) if *i >= 0 => Some(*i as u64),
-    _ => None,
-  }
-}
-
-/// Represents the state of a key when read from the store
-pub enum KeyState {
-  /// Key does not exist
-  NotFound,
-  /// Key exists but is expired (treat as not existing)
-  Expired,
-  /// Key exists as a string value
-  String(StringValue),
-  /// Key exists as a hash
-  Hash(HashMetadata),
-}
-
-/// Read key state from the store, handling expiration detection
-pub async fn read_key_state(server: &Server, key: &str) -> Result<KeyState, String> {
-  let raw_value = match server.get(key).await? {
-    Some(v) => v,
-    None => return Ok(KeyState::NotFound),
-  };
-
-  let now = now_ms();
-
-  // Try to deserialize as StringValue
-  if let Ok(string_value) = StringValue::deserialize(&raw_value) {
-    if string_value.is_expired(now) {
-      // Lazily delete the expired key
-      let _ = server.delete(key).await;
-      return Ok(KeyState::Expired);
-    }
-    return Ok(KeyState::String(string_value));
-  }
-
-  // Try to deserialize as HashMetadata
-  if let Ok(hash_metadata) = HashMetadata::deserialize(&raw_value) {
-    if hash_metadata.is_expired(now) {
-      // Lazily delete the expired key
-      let _ = server.delete(key).await;
-      return Ok(KeyState::Expired);
-    }
-    return Ok(KeyState::Hash(hash_metadata));
-  }
-
-  // Unknown type — still valid, but we can't update its expiration
-  // Return as "not found" since we can't meaningfully set expiration on it
-  Ok(KeyState::NotFound)
-}
-
-/// EXPIRE command executor
-pub struct ExpireCommand;
+/// PEXPIRE command executor
+pub struct PexpireCommand;
 
 #[async_trait]
-impl Command for ExpireCommand {
+impl Command for PexpireCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match ExpireParams::parse(items) {
+    let params = match PexpireParams::parse(items) {
       Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'expire' command"),
+      None => return Value::error("ERR wrong number of arguments for 'pexpire' command"),
     };
+
+    // Negative milliseconds: delete the key immediately
+    if params.milliseconds < 0 {
+      match server.delete(&params.key).await {
+        Ok(_) => return Value::Integer(1),
+        Err(e) => return Value::error(format!("ERR failed to delete key: {}", e)),
+      }
+    }
 
     // Read current key state
     let key_state = match read_key_state(server, &params.key).await {
@@ -169,7 +120,15 @@ impl Command for ExpireCommand {
 
     // Calculate new expiration timestamp in milliseconds
     let now = now_ms();
-    let new_expires_at = now + params.seconds * 1000;
+    let new_expires_at = now + params.milliseconds as u64;
+
+    // Zero milliseconds: delete the key immediately
+    if params.milliseconds == 0 {
+      match server.delete(&params.key).await {
+        Ok(_) => return Value::Integer(1),
+        Err(e) => return Value::error(format!("ERR failed to delete key: {}", e)),
+      }
+    }
 
     // Check expire condition
     let should_set = match &params.condition {
@@ -237,158 +196,161 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_expire_params_parse_basic() {
+  fn test_pexpire_params_parse_basic() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
     assert_eq!(params.key, "mykey");
-    assert_eq!(params.seconds, 60);
+    assert_eq!(params.milliseconds, 60000);
     assert_eq!(params.condition, None);
   }
 
   #[test]
-  fn test_expire_params_parse_with_nx() {
+  fn test_pexpire_params_parse_with_nx() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"NX".to_vec())),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
+    assert_eq!(params.key, "mykey");
+    assert_eq!(params.milliseconds, 60000);
     assert_eq!(params.condition, Some(ExpireCondition::Nx));
   }
 
   #[test]
-  fn test_expire_params_parse_with_xx() {
+  fn test_pexpire_params_parse_with_xx() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"XX".to_vec())),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
     assert_eq!(params.condition, Some(ExpireCondition::Xx));
   }
 
   #[test]
-  fn test_expire_params_parse_with_gt() {
+  fn test_pexpire_params_parse_with_gt() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"GT".to_vec())),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
     assert_eq!(params.condition, Some(ExpireCondition::Gt));
   }
 
   #[test]
-  fn test_expire_params_parse_with_lt() {
+  fn test_pexpire_params_parse_with_lt() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"LT".to_vec())),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
     assert_eq!(params.condition, Some(ExpireCondition::Lt));
   }
 
   #[test]
-  fn test_expire_params_parse_insufficient_args() {
-    // Only EXPIRE key (missing seconds)
+  fn test_pexpire_params_parse_insufficient_args() {
+    // Only PEXPIRE key (missing milliseconds)
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_none());
 
-    // Only EXPIRE
-    let items = vec![Value::BulkString(Some(b"EXPIRE".to_vec()))];
-    assert!(ExpireParams::parse(&items).is_none());
+    // Only PEXPIRE
+    let items = vec![Value::BulkString(Some(b"PEXPIRE".to_vec()))];
+    assert!(PexpireParams::parse(&items).is_none());
 
     // Empty
     let items: Vec<Value> = vec![];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_none());
   }
 
   #[test]
-  fn test_expire_params_parse_invalid_seconds() {
+  fn test_pexpire_params_parse_invalid_milliseconds() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"not_a_number".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_none());
   }
 
   #[test]
-  fn test_expire_params_parse_invalid_key_type() {
+  fn test_pexpire_params_parse_invalid_key_type() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::Integer(123),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_none());
   }
 
   #[test]
-  fn test_expire_params_parse_unknown_option() {
+  fn test_pexpire_params_parse_unknown_option() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::BulkString(Some(b"60".to_vec())),
+      Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"UNKNOWN".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_none());
   }
 
   #[test]
-  fn test_expire_params_parse_with_simple_string() {
+  fn test_pexpire_params_parse_with_simple_string() {
     let items = vec![
-      Value::SimpleString("EXPIRE".to_string()),
+      Value::SimpleString("PEXPIRE".to_string()),
       Value::SimpleString("mykey".to_string()),
-      Value::SimpleString("120".to_string()),
+      Value::SimpleString("120000".to_string()),
       Value::SimpleString("NX".to_string()),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
+    let params = PexpireParams::parse(&items).unwrap();
     assert_eq!(params.key, "mykey");
-    assert_eq!(params.seconds, 120);
+    assert_eq!(params.milliseconds, 120000);
     assert_eq!(params.condition, Some(ExpireCondition::Nx));
   }
 
   #[test]
-  fn test_expire_params_parse_seconds_as_integer() {
+  fn test_pexpire_params_parse_milliseconds_as_integer() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
-      Value::Integer(300),
+      Value::Integer(300000),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
-    assert_eq!(params.seconds, 300);
+    let params = PexpireParams::parse(&items).unwrap();
+    assert_eq!(params.milliseconds, 300000);
   }
 
   #[test]
-  fn test_expire_params_parse_negative_seconds() {
+  fn test_pexpire_params_parse_negative_milliseconds() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::Integer(-1),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    let params = PexpireParams::parse(&items).unwrap();
+    assert_eq!(params.milliseconds, -1);
   }
 
   #[test]
-  fn test_expire_params_parse_zero_seconds() {
+  fn test_pexpire_params_parse_zero_milliseconds() {
     let items = vec![
-      Value::BulkString(Some(b"EXPIRE".to_vec())),
+      Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::Integer(0),
     ];
-    let params = ExpireParams::parse(&items).unwrap();
-    assert_eq!(params.seconds, 0);
+    let params = PexpireParams::parse(&items).unwrap();
+    assert_eq!(params.milliseconds, 0);
   }
 }

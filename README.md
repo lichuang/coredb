@@ -179,7 +179,7 @@ print(r.get('key'))
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `LPUSH key value [value ...]` | Push to left | ❌ |
+| `LPUSH key value [value ...]` | Push to left | ✅ |
 | `RPUSH key value [value ...]` | Push to right | ❌ |
 | `LPOP key [count]` | Pop from left | ❌ |
 | `RPOP key [count]` | Pop from right | ❌ |

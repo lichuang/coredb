@@ -3,11 +3,13 @@
 //! This module provides Redis list commands including LPUSH, RPUSH, LPOP, RPOP,
 //! LLEN, LRANGE, LINDEX, LSET, LREM, and LTRIM.
 
+pub mod llen;
 pub mod lpop;
 pub mod lpush;
 pub mod rpop;
 pub mod rpush;
 
+pub use llen::LLenCommand;
 pub use lpop::LPopCommand;
 pub use lpush::LPushCommand;
 pub use rpop::RPopCommand;

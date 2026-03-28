@@ -183,7 +183,7 @@ print(r.get('key'))
 | `RPUSH key value [value ...]` | Push to right | ✅ |
 | `LPOP key [count]` | Pop from left | ✅ |
 | `RPOP key [count]` | Pop from right | ✅ |
-| `LLEN key` | Get list length | ❌ |
+| `LLEN key` | Get list length | ✅ |
 | `LRANGE key start stop` | Get range of elements | ❌ |
 | `LINDEX key index` | Get element at index | ❌ |
 | `LSET key index value` | Set element at index | ❌ |

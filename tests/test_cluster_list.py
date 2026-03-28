@@ -623,6 +623,170 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_llen_nonexistent_key(self) -> bool:
+        """Test LLEN on a non-existent key returns 0."""
+        print("\nTest: LLEN non-existent key")
+
+        key = "llen_nonexistent"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  LLEN '{key}' on non-existent key...")
+        try:
+            result = write_node.llen(key)
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+
+        print("  LLEN returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_llen_after_push(self) -> bool:
+        """Test LLEN returns correct length after LPUSH/RPUSH operations."""
+        print("\nTest: LLEN after push operations")
+
+        key = "llen_after_push"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        # Empty list
+        try:
+            result = write_node.llen(key)
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0 for empty, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN empty = 0: OK")
+
+        # LPUSH one element
+        write_node.lpush(key, "a")
+        try:
+            result = write_node.llen(key)
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after LPUSH 1 = 1: OK")
+
+        # LPUSH multiple
+        write_node.lpush(key, "b", "c")
+        try:
+            result = write_node.llen(key)
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after LPUSH 2 more = 3: OK")
+
+        # RPUSH more
+        write_node.rpush(key, "d", "e", "f")
+        try:
+            result = write_node.llen(key)
+            if result != 6:
+                print(f"\033[31m  FAILED: Expected 6, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after RPUSH 3 more = 6: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_llen_after_pop(self) -> bool:
+        """Test LLEN returns correct length after LPOP/RPOP operations."""
+        print("\nTest: LLEN after pop operations")
+
+        key = "llen_after_pop"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.lpush(key, "a", "b", "c", "d", "e")
+
+        try:
+            result = write_node.llen(key)
+            if result != 5:
+                print(f"\033[31m  FAILED: Expected 5, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN = 5: OK")
+
+        write_node.lpop(key)
+        try:
+            result = write_node.llen(key)
+            if result != 4:
+                print(f"\033[31m  FAILED: Expected 4, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after LPOP 1 = 4: OK")
+
+        write_node.rpop(key, count=2)
+        try:
+            result = write_node.llen(key)
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after RPOP 2 = 2: OK")
+
+        # Pop remaining
+        write_node.lpop(key)
+        write_node.rpop(key)
+        try:
+            result = write_node.llen(key)
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LLEN failed - {e}")
+            return False
+        print("  LLEN after popping all = 0: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_llen_wrong_type(self) -> bool:
+        """Test LLEN on a key holding wrong type returns WRONGTYPE error."""
+        print("\nTest: LLEN wrong type error")
+
+        key = "llen_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  LLEN on string key '{key}'...")
+        try:
+            write_node.llen(key)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all list tests."""
         print("\n" + "=" * 50)
@@ -649,6 +813,10 @@ class TestClusterList(TestClusterBase):
             self.test_rpush_empty_element,
             self.test_rpush_binary_element,
             self.test_rpush_after_lpush,
+            self.test_llen_nonexistent_key,
+            self.test_llen_after_push,
+            self.test_llen_after_pop,
+            self.test_llen_wrong_type,
         ]
 
         passed = 0

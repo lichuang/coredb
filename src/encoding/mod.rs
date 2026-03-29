@@ -7,6 +7,7 @@ pub mod hash;
 pub mod list;
 pub mod set;
 pub mod string;
+pub mod zset;
 
 /// Current format version for all encoded types (stored in high 4 bits of flags)
 pub const CURRENT_VERSION: u8 = 1;
@@ -16,6 +17,7 @@ pub const TYPE_STRING: u8 = 0x01;
 pub const TYPE_HASH: u8 = 0x02;
 pub const TYPE_LIST: u8 = 0x03;
 pub const TYPE_SET: u8 = 0x04;
+pub const TYPE_ZSET: u8 = 0x05;
 
 /// Special value indicating no expiration (0 means never expire)
 pub const NO_EXPIRATION: u64 = 0;
@@ -26,3 +28,5 @@ pub use list::{ListElementValue, ListMetadata};
 #[allow(unused_imports)]
 pub use set::{SetMemberValue, SetMetadata};
 pub use string::StringValue;
+#[allow(unused_imports)]
+pub use zset::{ZSetMemberValue, ZSetMetadata};

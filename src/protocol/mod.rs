@@ -11,6 +11,7 @@ pub mod list;
 pub mod resp;
 pub mod set;
 pub mod string;
+pub mod zset;
 
 pub use command::CommandFactory;
 pub use resp::{Parser, Value};

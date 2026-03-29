@@ -13,6 +13,7 @@ use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
   MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
 };
+use crate::protocol::zset::ZAddCommand;
 use crate::server::Server;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -92,6 +93,9 @@ impl CommandFactory {
 
     // Register set commands
     factory.register("SADD", SAddCommand);
+
+    // Register zset commands
+    factory.register("ZADD", ZAddCommand);
 
     factory
   }

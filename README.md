@@ -291,6 +291,17 @@ print(r.get('key'))
 | `PUNSUBSCRIBE [pattern ...]` | Unsubscribe from pattern(s) | ❌ |
 | `PUBSUB subcommand` | Pub/Sub introspection | ❌ |
 
+### Bloom Filter Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `BF.ADD key item` | Add item to Bloom Filter | ❌ |
+| `BF.EXISTS key item` | Check if item exists | ❌ |
+| `BF.MADD key item [item ...]` | Add multiple items | ❌ |
+| `BF.MEXISTS key item [item ...]` | Check if multiple items exist | ❌ |
+| `BF.RESERVE key error_rate capacity [EXPANSION expansion]` | Create Bloom Filter with parameters | ❌ |
+| `BF.INFO key` | Get Bloom Filter info | ❌ |
+
 ### Stream Commands
 
 | Command | Description | Status |

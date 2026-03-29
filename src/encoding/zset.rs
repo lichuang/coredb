@@ -65,7 +65,6 @@ pub struct ZSetMetadata {
   pub size: u64,
 }
 
-#[allow(dead_code)]
 impl ZSetMetadata {
   /// Create a new empty ZSetMetadata without expiration
   pub fn new() -> Self {
@@ -126,6 +125,7 @@ impl ZSetMetadata {
   }
 
   /// Decrement the size (when removing a member)
+  #[allow(dead_code)]
   pub fn decr_size(&mut self) {
     if self.size > 0 {
       self.size -= 1;
@@ -157,7 +157,6 @@ impl Default for ZSetMetadata {
 }
 
 /// Errors that can occur during decoding
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
   /// Input data is invalid or corrupted
@@ -199,7 +198,6 @@ pub struct ZSetMemberValue {
   pub score: f64,
 }
 
-#[allow(dead_code)]
 impl ZSetMemberValue {
   /// Create a new ZSetMemberValue with the given score
   pub fn new(score: f64) -> Self {
@@ -261,6 +259,7 @@ impl ZSetMemberValue {
   /// Build the hex-encoded prefix for scanning all members of a zset
   ///
   /// Format: hex(key_len(4 bytes) | key | version(8 bytes))
+  #[allow(dead_code)]
   pub fn build_prefix_hex(key: &[u8], version: u64) -> String {
     let key_len = key.len() as u32;
     let mut prefix = Vec::with_capacity(4 + key.len() + 8);

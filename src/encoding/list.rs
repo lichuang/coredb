@@ -72,7 +72,6 @@ pub const INITIAL_INDEX: u64 = u64::MAX / 2;
 ///
 /// Stored at the user key in RocksDB. Tracks the list boundaries (head/tail)
 /// and element count.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ListMetadata {
   /// Flags field: high 4 bits = encoding version, low 4 bits = data type
@@ -89,7 +88,6 @@ pub struct ListMetadata {
   pub tail: u64,
 }
 
-#[allow(dead_code)]
 impl ListMetadata {
   /// Create a new empty ListMetadata without expiration
   pub fn new() -> Self {
@@ -169,6 +167,7 @@ impl ListMetadata {
   /// - Negative: -1 is last element, -2 is second to last, etc.
   ///
   /// Returns `None` if the resolved index is out of range.
+  #[allow(dead_code)]
   pub fn resolve_index(&self, index: i64) -> Option<u64> {
     let physical = if index < 0 {
       // -1 maps to size-1, -2 maps to size-2, etc.
@@ -196,7 +195,6 @@ impl Default for ListMetadata {
 }
 
 /// Errors that can occur during decoding
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
   /// Input data is invalid or corrupted
@@ -231,14 +229,12 @@ impl Error for DecodeError {}
 /// - `version`: 8-byte version from ListMetadata
 /// - `index`: 8-byte element index (u64, big-endian)
 /// - `data`: the element value (this struct)
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ListElementValue {
   /// The element value
   pub data: Vec<u8>,
 }
 
-#[allow(dead_code)]
 impl ListElementValue {
   #[allow(dead_code)]
   /// Create a new ListElementValue
@@ -293,6 +289,7 @@ impl ListElementValue {
   /// Build the hex-encoded prefix for scanning all elements of a list
   ///
   /// Format: hex(key_len(4 bytes) | key | version(8 bytes))
+  #[allow(dead_code)]
   pub fn build_prefix_hex(key: &[u8], version: u64) -> String {
     let key_len = key.len() as u32;
     let mut prefix = Vec::with_capacity(4 + key.len() + 8);

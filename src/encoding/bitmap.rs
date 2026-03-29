@@ -75,7 +75,6 @@ pub struct BitmapMetadata {
   pub size: u64,
 }
 
-#[allow(dead_code)]
 impl BitmapMetadata {
   /// Create a new empty BitmapMetadata without expiration
   pub fn new() -> Self {
@@ -155,7 +154,6 @@ impl Default for BitmapMetadata {
 }
 
 /// Errors that can occur during decoding
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
   /// Input data is invalid or corrupted
@@ -190,10 +188,8 @@ impl Error for DecodeError {}
 /// - `version`: 8-byte version from BitmapMetadata
 /// - `index`: fragment index = bit_offset / 8192
 /// - `fragment`: raw bytes, up to 1024 bytes
-#[allow(dead_code)]
 pub struct BitmapFragment;
 
-#[allow(dead_code)]
 impl BitmapFragment {
   /// Build the sub-key for storage: key_len|key|version|fragment_index
   ///
@@ -223,6 +219,7 @@ impl BitmapFragment {
   /// Build the hex-encoded prefix for scanning all fragments of a bitmap
   ///
   /// Format: hex(key_len(4 bytes) | key | version(8 bytes))
+  #[allow(dead_code)]
   pub fn build_prefix_hex(key: &[u8], version: u64) -> String {
     let key_len = key.len() as u32;
     let mut prefix = Vec::with_capacity(4 + key.len() + 8);

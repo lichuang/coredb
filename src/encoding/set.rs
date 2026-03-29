@@ -64,7 +64,6 @@ pub struct SetMetadata {
   pub size: u64,
 }
 
-#[allow(dead_code)]
 impl SetMetadata {
   /// Create a new empty SetMetadata without expiration
   pub fn new() -> Self {
@@ -125,6 +124,7 @@ impl SetMetadata {
   }
 
   /// Decrement the size (when removing a member)
+  #[allow(dead_code)]
   pub fn decr_size(&mut self) {
     if self.size > 0 {
       self.size -= 1;
@@ -156,7 +156,6 @@ impl Default for SetMetadata {
 }
 
 /// Errors that can occur during decoding
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecodeError {
   /// Input data is invalid or corrupted
@@ -194,7 +193,6 @@ impl Error for DecodeError {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetMemberValue;
 
-#[allow(dead_code)]
 impl SetMemberValue {
   /// Serialize to bytes (empty value for set members)
   pub fn serialize(&self) -> Vec<u8> {
@@ -202,6 +200,7 @@ impl SetMemberValue {
   }
 
   /// Deserialize from bytes (empty value expected for set members)
+  #[allow(dead_code)]
   pub fn deserialize(bytes: &[u8]) -> Result<Self, DecodeError> {
     if bytes.is_empty() {
       Ok(Self)
@@ -247,6 +246,7 @@ impl SetMemberValue {
   /// Build the hex-encoded prefix for scanning all members of a set
   ///
   /// Format: hex(key_len(4 bytes) | key | version(8 bytes))
+  #[allow(dead_code)]
   pub fn build_prefix_hex(key: &[u8], version: u64) -> String {
     let key_len = key.len() as u32;
     let mut prefix = Vec::with_capacity(4 + key.len() + 8);

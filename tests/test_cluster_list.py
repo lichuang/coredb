@@ -821,7 +821,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, 0, -1)
-            expected = [b"a", b"b", b"c", b"d", b"e"]
+            expected = ["a", "b", "c", "d", "e"]
             if result != expected:
                 print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
@@ -845,7 +845,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, 1, 3)
-            expected = [b"b", b"c", b"d"]
+            expected = ["b", "c", "d"]
             if result != expected:
                 print(f"\033[31m  FAILED: LRANGE 1 3: Expected {expected}, got {result}")
                 return False
@@ -856,7 +856,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, 0, 0)
-            expected = [b"a"]
+            expected = ["a"]
             if result != expected:
                 print(f"\033[31m  FAILED: LRANGE 0 0: Expected {expected}, got {result}")
                 return False
@@ -867,7 +867,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, -3, -1)
-            expected = [b"c", b"d", b"e"]
+            expected = ["c", "d", "e"]
             if result != expected:
                 print(f"\033[31m  FAILED: LRANGE -3 -1: Expected {expected}, got {result}")
                 return False
@@ -878,7 +878,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, -1, -1)
-            expected = [b"e"]
+            expected = ["e"]
             if result != expected:
                 print(f"\033[31m  FAILED: LRANGE -1 -1: Expected {expected}, got {result}")
                 return False
@@ -912,7 +912,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, 0, 100)
-            expected = [b"a", b"b", b"c"]
+            expected = ["a", "b", "c"]
             if result != expected:
                 print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
@@ -923,7 +923,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, -100, -1)
-            expected = [b"a", b"b", b"c"]
+            expected = ["a", "b", "c"]
             if result != expected:
                 print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False
@@ -971,7 +971,7 @@ class TestClusterList(TestClusterBase):
 
         try:
             result = write_node.lrange(key, 0, -1)
-            expected = [b"a", b"b", b"c"]
+            expected = ["a", "b", "c"]
             if result != expected:
                 print(f"\033[31m  FAILED: Expected {expected}, got {result}")
                 return False

@@ -194,7 +194,7 @@ print(r.get('key'))
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `SADD key member [member ...]` | Add member(s) to set | ❌ |
+| `SADD key member [member ...]` | Add member(s) to set | ✅ |
 | `SREM key member [member ...]` | Remove member(s) from set | ❌ |
 | `SMEMBERS key` | Get all members | ❌ |
 | `SISMEMBER key member` | Check if member exists | ❌ |

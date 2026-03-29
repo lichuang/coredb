@@ -9,6 +9,7 @@ pub mod hash;
 pub mod key;
 pub mod list;
 pub mod resp;
+pub mod set;
 pub mod string;
 
 pub use command::CommandFactory;

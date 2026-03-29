@@ -116,7 +116,7 @@ impl Error for DecodeError {}
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::encoding::{CURRENT_VERSION, NO_EXPIRATION, TYPE_STRING};
+  use crate::encoding::{NO_EXPIRATION, TYPE_STRING};
 
   #[test]
   fn test_encode_decode_without_expiration() {

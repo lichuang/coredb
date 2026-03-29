@@ -111,6 +111,8 @@ print(r.get('key'))
 
 ## Commands
 
+> The command list below is sourced from the [Redis official data types documentation](https://redis.io/docs/latest/develop/data-types/).
+
 ### String Commands
 
 | Command | Description | Status |
@@ -142,6 +144,22 @@ print(r.get('key'))
 | `BITPOS key bit [start end]` | Find first bit with given value | ❌ |
 | `BITOP operation destkey key [key ...]` | Perform bitwise operations | ❌ |
 | `BITFIELD key [GET type offset] [SET type offset value] [INCRBY type offset increment] [OVERFLOW wrap|sat|fail]` | Perform bit field operations | ❌ |
+
+### JSON Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `JSON.GET key [path [path ...]]` | Get JSON value at path | ❌ |
+| `JSON.SET key path value [NX\|XX]` | Set JSON value at path | ❌ |
+| `JSON.DEL key [path [path ...]]` | Delete JSON value at path | ❌ |
+| `JSON.TYPE key [path]` | Get type of JSON value | ❌ |
+| `JSON.NUMINCRBY key path value` | Increment JSON number | ❌ |
+| `JSON.STRAPPEND key path value` | Append string to JSON string | ❌ |
+| `JSON.ARRAPPEND key path value [value ...]` | Append to JSON array | ❌ |
+| `JSON.ARRLEN key [path]` | Get JSON array length | ❌ |
+| `JSON.OBJLEN key [path]` | Get JSON object length | ❌ |
+| `JSON.OBJKEYS key [path]` | Get JSON object keys | ❌ |
+| `JSON.MGET key [key ...] path` | Get values from multiple keys | ❌ |
 
 ### Hash Commands
 
@@ -301,6 +319,51 @@ print(r.get('key'))
 | `BF.MEXISTS key item [item ...]` | Check if multiple items exist | ❌ |
 | `BF.RESERVE key error_rate capacity [EXPANSION expansion]` | Create Bloom Filter with parameters | ❌ |
 | `BF.INFO key` | Get Bloom Filter info | ❌ |
+
+### Cuckoo Filter Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `CF.ADD key item` | Add item to Cuckoo Filter | ❌ |
+| `CF.EXISTS key item` | Check if item exists | ❌ |
+| `CF.DEL key item` | Delete item from Cuckoo Filter | ❌ |
+| `CF.COUNT key item` | Count item occurrences | ❌ |
+| `CF.RESERVE key capacity [BUCKETSIZE size] [MAXITERATIONS iter] [EXPANSION expansion]` | Create Cuckoo Filter with parameters | ❌ |
+| `CF.INFO key` | Get Cuckoo Filter info | ❌ |
+
+### t-digest Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `TDIGEST.CREATE key [COMPRESSION compression]` | Create t-digest sketch | ❌ |
+| `TDIGEST.ADD key value [value ...]` | Add values to t-digest | ❌ |
+| `TDIGEST.MERGE destkey srckey [srckey ...]` | Merge t-digests | ❌ |
+| `TDIGEST.MIN key` | Get minimum value | ❌ |
+| `TDIGEST.MAX key` | Get maximum value | ❌ |
+| `TDIGEST.QUANTILE key quantile` | Get quantile value | ❌ |
+| `TDIGEST.CDF key value` | Get cumulative distribution | ❌ |
+| `TDIGEST.INFO key` | Get t-digest info | ❌ |
+
+### Top-K Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `TOPK.RESERVE key topk [width depth decay]` | Create Top-K sketch | ❌ |
+| `TOPK.ADD key item [item ...]` | Add items to Top-K | ❌ |
+| `TOPK.QUERY key item [item ...]` | Check if items in Top-K | ❌ |
+| `TOPK.LIST key` | List all Top-K items | ❌ |
+| `TOPK.INFO key` | Get Top-K info | ❌ |
+
+### Count-min Sketch Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `CMS.INITBYDIM key width depth` | Create CMS with dimensions | ❌ |
+| `CMS.INITBYPROB key error probability [probability ...]` | Create CMS with error rate | ❌ |
+| `CMS.INCRBY key item increment [item increment ...]` | Increment item counts | ❌ |
+| `CMS.QUERY key item [item ...]` | Get item counts | ❌ |
+| `CMS.MERGE destkey numkeys key [key ...] [WEIGHTS weight [weight ...]]` | Merge CMS sketches | ❌ |
+| `CMS.INFO key` | Get CMS info | ❌ |
 
 ### Stream Commands
 

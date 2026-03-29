@@ -7,6 +7,7 @@ pub mod bitmap;
 pub mod bloomfilter;
 pub mod hash;
 pub mod hyperloglog;
+pub mod json;
 pub mod list;
 pub mod set;
 pub mod string;
@@ -24,6 +25,7 @@ pub const TYPE_ZSET: u8 = 0x05;
 pub const TYPE_BITMAP: u8 = 0x06;
 pub const TYPE_BLOOMFILTER: u8 = 0x09;
 pub const TYPE_HYPERLOGLOG: u8 = 0x0B;
+pub const TYPE_JSON: u8 = 0x0A;
 
 /// Special value indicating no expiration (0 means never expire)
 pub const NO_EXPIRATION: u64 = 0;
@@ -35,6 +37,8 @@ pub use bloomfilter::{BloomFilterMetadata, BloomFilterSubKey};
 pub use hash::{HashFieldValue, HashMetadata};
 #[allow(unused_imports)]
 pub use hyperloglog::{HyperLogLogMetadata, HyperLogLogSubKey};
+#[allow(unused_imports)]
+pub use json::JsonMetadata;
 pub use list::{ListElementValue, ListMetadata};
 pub use set::{SetMemberValue, SetMetadata};
 pub use string::StringValue;

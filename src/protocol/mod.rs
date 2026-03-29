@@ -3,6 +3,7 @@
 //! This module provides RESP (REdis Serialization Protocol) parsing and
 //! Redis command handling.
 
+pub mod bitmap;
 pub mod command;
 pub mod connection;
 pub mod hash;

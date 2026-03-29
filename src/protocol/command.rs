@@ -1,3 +1,4 @@
+use crate::protocol::bitmap::{GetBitCommand, SetBitCommand};
 use crate::protocol::connection::PingCommand;
 use crate::protocol::hash::{
   HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HIncrByCommand, HKeysCommand,
@@ -96,6 +97,10 @@ impl CommandFactory {
 
     // Register zset commands
     factory.register("ZADD", ZAddCommand);
+
+    // Register bitmap commands
+    factory.register("GETBIT", GetBitCommand);
+    factory.register("SETBIT", SetBitCommand);
 
     factory
   }

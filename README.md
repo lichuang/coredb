@@ -136,8 +136,8 @@ print(r.get('key'))
 
 | Command | Description | Status |
 |---------|-------------|--------|
-| `GETBIT key offset` | Get bit at offset | ❌ |
-| `SETBIT key offset value` | Set bit at offset | ❌ |
+| `GETBIT key offset` | Get bit at offset | ✅ |
+| `SETBIT key offset value` | Set bit at offset | ✅ |
 | `BITCOUNT key [start end]` | Count set bits | ❌ |
 | `BITPOS key bit [start end]` | Find first bit with given value | ❌ |
 | `BITOP operation destkey key [key ...]` | Perform bitwise operations | ❌ |

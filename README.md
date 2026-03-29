@@ -132,6 +132,17 @@ print(r.get('key'))
 | `PSETEX key milliseconds value` | Set with expiration (ms) | ✅ |
 | `SETNX key value` | Set if key not exists | ✅ |
 
+### Bitmap Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `GETBIT key offset` | Get bit at offset | ❌ |
+| `SETBIT key offset value` | Set bit at offset | ❌ |
+| `BITCOUNT key [start end]` | Count set bits | ❌ |
+| `BITPOS key bit [start end]` | Find first bit with given value | ❌ |
+| `BITOP operation destkey key [key ...]` | Perform bitwise operations | ❌ |
+| `BITFIELD key [GET type offset] [SET type offset value] [INCRBY type offset increment] [OVERFLOW wrap|sat|fail]` | Perform bit field operations | ❌ |
+
 ### Hash Commands
 
 | Command | Description | Status |
@@ -221,6 +232,25 @@ print(r.get('key'))
 | `ZREVRANK key member` | Get member rank (reverse) | ❌ |
 | `ZINCRBY key increment member` | Increment member score | ❌ |
 | `ZREMKEY key` | Remove key | ❌ |
+
+### HyperLogLog Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `PFADD key element [element ...]` | Add element(s) to HyperLogLog | ❌ |
+| `PFCOUNT key [key ...]` | Get approximate cardinality | ❌ |
+| `PFMERGE destkey sourcekey [sourcekey ...]` | Merge HyperLogLogs | ❌ |
+
+### GEO Commands
+
+| Command | Description | Status |
+|---------|-------------|--------|
+| `GEOADD key [NX\|XX] [CH] longitude latitude member [longitude latitude member ...]` | Add geo member(s) | ❌ |
+| `GEOHASH key member [member ...]` | Get GeoHash string(s) | ❌ |
+| `GEOPOS key member [member ...]` | Get member position(s) | ❌ |
+| `GEODIST key member1 member2 [M\|KM\|FT\|MI]` | Get distance between members | ❌ |
+| `GEORADIUS key longitude latitude radius M\|KM\|FT\|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count]` | Query by radius | ❌ |
+| `GEORADIUSBYMEMBER key member radius M\|KM\|FT\|MI [WITHCOORD] [WITHDIST] [WITHHASH] [COUNT count]` | Query by member radius | ❌ |
 
 ### Transaction Commands
 

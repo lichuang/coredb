@@ -335,6 +335,250 @@ class TestClusterSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_srem_single_member(self) -> bool:
+        """Test SREM with a single member."""
+        print("\nTest: SREM single member")
+
+        key = "srem_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SREM '{key}' 'a'...")
+        try:
+            result = write_node.srem(key, "a")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_multiple_members(self) -> bool:
+        """Test SREM with multiple members."""
+        print("\nTest: SREM multiple members")
+
+        key = "srem_multi"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c", "d")
+
+        print(f"  SREM '{key}' a b c...")
+        try:
+            result = write_node.srem(key, "a", "b", "c")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM returned 3: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_nonexistent_member(self) -> bool:
+        """Test SREM with member that does not exist in the set."""
+        print("\nTest: SREM nonexistent member")
+
+        key = "srem_nonexist"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b")
+
+        print(f"  SREM '{key}' 'z' (not in set)...")
+        try:
+            result = write_node.srem(key, "z")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_nonexistent_key(self) -> bool:
+        """Test SREM on a key that does not exist."""
+        print("\nTest: SREM nonexistent key")
+
+        key = "srem_nokey"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  SREM '{key}' 'a' on non-existent key...")
+        try:
+            result = write_node.srem(key, "a")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_wrong_type(self) -> bool:
+        """Test SREM on a key holding wrong type."""
+        print("\nTest: SREM wrong type error")
+
+        key = "srem_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  SREM on string key '{key}'...")
+        try:
+            write_node.srem(key, "member")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_mixed_members(self) -> bool:
+        """Test SREM with mix of existing and non-existing members."""
+        print("\nTest: SREM mixed existing and non-existing members")
+
+        key = "srem_mixed"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SREM '{key}' a z b (z not in set)...")
+        try:
+            result = write_node.srem(key, "a", "z", "b")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM returned 2: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_replication(self) -> bool:
+        """Test that SREM data replicates to all nodes."""
+        print("\nTest: SREM replication")
+
+        key = "srem_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SREM '{key}' a b on random node...")
+        try:
+            result = write_node.srem(key, "a", "b")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  SREM from all nodes to verify replication...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.srem(key, "a", "b")
+                if result != 0:
+                    print(f"    Node {i}: FAILED (expected 0, got {result})")
+                    return False
+                print(f"    Node {i}: OK (srem returned 0, members already removed)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_insufficient_args(self) -> bool:
+        """Test SREM with insufficient arguments returns error."""
+        print("\nTest: SREM insufficient arguments")
+
+        key = "srem_no_args"
+        write_node = self._get_random_node()
+
+        print(f"  SREM without members...")
+        try:
+            write_node.srem(key)
+            print(f"\033[31m  FAILED: Expected error")
+            return False
+        except redis.RedisError as e:
+            error_msg = str(e)
+            if "wrong number" not in error_msg.lower():
+                print(f"\033[31m  FAILED: Expected wrong number error, got: {e}")
+                return False
+            print(f"  Got expected error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_srem_atomicity_batch_consistency(self) -> bool:
+        """Test that SREM multi-member operations are atomic (all or nothing)."""
+        print("\nTest: SREM atomicity batch consistency")
+
+        key = "srem_atomic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c", "d")
+
+        print(f"  SREM '{key}' a b c (3 members)...")
+        try:
+            result = write_node.srem(key, "a", "b", "c")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM failed - {e}")
+            return False
+
+        print("  Verifying all removed members are gone...")
+        try:
+            result = write_node.srem(key, "a", "b", "c")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0 (all removed), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM verify failed - {e}")
+            return False
+
+        print("  Verifying remaining member still exists...")
+        try:
+            result = write_node.srem(key, "d")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1 (d still exists), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SREM verify failed - {e}")
+            return False
+
+        print("  All consistency checks passed: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all set tests."""
         print("\n" + "=" * 50)
@@ -357,6 +601,15 @@ class TestClusterSet(TestClusterBase):
             self.test_sadd_large_number_of_members,
             self.test_sadd_insufficient_args,
             self.test_sadd_special_characters,
+            self.test_srem_single_member,
+            self.test_srem_multiple_members,
+            self.test_srem_nonexistent_member,
+            self.test_srem_nonexistent_key,
+            self.test_srem_wrong_type,
+            self.test_srem_mixed_members,
+            self.test_srem_replication,
+            self.test_srem_insufficient_args,
+            self.test_srem_atomicity_batch_consistency,
         ]
 
         passed = 0

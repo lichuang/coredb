@@ -44,17 +44,42 @@ src/
 │   └── mod.rs        # Config struct with raft + server_addr + log
 ├── server/           # TCP server implementation
 │   └── server.rs     # Server struct with Raft node integration
+├── error/            # Error types
+│   └── mod.rs        # Error definitions
 ├── protocol/         # Redis protocol implementation
 │   ├── command.rs    # Command trait & factory
 │   ├── resp.rs       # RESP parser & Value enum
 │   ├── connection/   # Connection commands (PING)
-│   ├── string/       # String commands (GET, SET)
-│   └── hash/         # Hash commands (HGET, HSET, HDEL, HEXISTS, HGETALL)
+│   ├── key/          # Key commands (DEL, EXISTS, EXPIRE, PEXPIRE, TYPE)
+│   ├── string/       # String commands (GET, SET, APPEND, INCR, DECR, MGET, MSET, SETEX, PSETEX, SETNX, STRLEN)
+│   ├── hash/         # Hash commands (HSET, HGET, HDEL, HEXISTS, HGETALL, HKEYS, HLEN, HMGET, HSETNX, HVALS, HINCRBY)
+│   ├── list/         # List commands (LPUSH, RPUSH, LPOP, RPOP, LLEN, LRANGE)
+│   ├── set/          # Set commands (SADD)
+│   ├── zset/         # Sorted set commands (ZADD)
+│   └── bitmap/       # Bitmap commands (SETBIT, GETBIT)
 ├── encoding/         # Storage encoding
-│   ├── string.rs     # StringValue encoding
-│   └── hash.rs       # HashMetadata & HashFieldValue encoding
-└── util/             # Utilities
-    └── time.rs       # now_ms() for timestamp
+│   ├── string.rs     # StringValue encoding (flags|expires_at|data)
+│   ├── hash.rs       # HashMetadata & HashFieldValue encoding
+│   ├── list.rs       # ListMetadata & ListElementValue encoding
+│   ├── set.rs        # SetMetadata & SetMemberValue encoding
+│   ├── zset.rs       # ZSetMetadata & ZSetMemberValue encoding
+│   ├── bitmap.rs     # BitmapMetadata & BitmapFragment encoding
+│   ├── bloomfilter.rs # BloomFilterMetadata & BloomFilterSubKey encoding
+│   ├── hyperloglog.rs # HyperLogLogMetadata & HyperLogLogSubKey encoding
+│   └── json.rs       # JsonMetadata encoding (flags|expires_at|format|payload)
+├── util/             # Utilities
+│   ├── mod.rs        # Module declarations
+│   └── time.rs       # now_ms() for timestamp
+tests/
+├── base_test.py      # TestClusterBase class
+├── cluster_manager.py # ClusterManager for build/start/stop/clean
+├── run_all_tests.py  # Runs all test files
+├── test_cluster_string.py
+├── test_cluster_hash.py
+├── test_cluster_list.py
+├── test_cluster_set.py
+├── test_cluster_zset.py
+└── test_cluster_bitmap.py
 ```
 
 ## Coding Style
@@ -207,6 +232,10 @@ python run_all_tests.py
 # Or run individual test files
 python test_cluster_string.py  # String command tests
 python test_cluster_hash.py    # Hash command tests
+python test_cluster_list.py    # List command tests
+python test_cluster_set.py     # Set command tests
+python test_cluster_zset.py    # Sorted set command tests
+python test_cluster_bitmap.py  # Bitmap command tests
 ```
 
 ### Manual Cluster Testing
@@ -225,13 +254,19 @@ cd tests
 1. **Create command file** in appropriate subdirectory:
    - String commands: `src/protocol/string/`
    - Hash commands: `src/protocol/hash/`
+   - List commands: `src/protocol/list/`
+   - Set commands: `src/protocol/set/`
+   - Sorted set commands: `src/protocol/zset/`
+   - Bitmap commands: `src/protocol/bitmap/`
+   - Key commands: `src/protocol/key/`
+   - Connection commands: `src/protocol/connection/`
    - Other types: create new subdirectory
 
 2. **Implement Command trait** following the pattern above
 
 3. **Export in mod.rs**:
    ```rust
-   // src/protocol/string/mod.rs or src/protocol/hash/mod.rs
+   // src/protocol/string/mod.rs or src/protocol/hash/mod.rs etc.
    pub use xxx::XxxCommand;
    ```
 
@@ -321,10 +356,70 @@ cargo run -- --conf {config file}
 - Keys are **lazily deleted** on read access
 - `NO_EXPIRATION` (0) means never expire
 
-### Hash Storage Layout
-- **Metadata**: stored at `key` - contains flags, expires_at, version, size
-- **Field-Value**: stored at hex-encoded `key|version|field` - contains only value data
+### Data Type Constants
+
+| Constant | Value | Type |
+|----------|-------|------|
+| `TYPE_STRING` | `0x01` | String |
+| `TYPE_HASH` | `0x02` | Hash |
+| `TYPE_LIST` | `0x03` | List |
+| `TYPE_SET` | `0x04` | Set |
+| `TYPE_ZSET` | `0x05` | Sorted Set |
+| `TYPE_BITMAP` | `0x06` | Bitmap |
+| `TYPE_JSON` | `0x0A` | JSON |
+| `TYPE_BLOOMFILTER` | `0x09` | Bloom Filter |
+| `TYPE_HYPERLOGLOG` | `0x0B` | HyperLogLog |
+
+### Storage Layout Patterns
+
+Two patterns are used depending on data type complexity:
+
+#### Simple Types (single key)
+**String, JSON** — all data stored at the key itself.
+- `key` → `flags|expires_at|[format|]payload`
+
+#### Complex Types (metadata + sub-keys)
+**Hash, List, Set, ZSet, Bitmap, BloomFilter, HyperLogLog** — metadata at the key, sub-items stored as separate keys with version for fast deletion.
+- Sub-keys are hex-encoded as `key_len|key|version|sub_key_part`
+- Incrementing the version invalidates all existing sub-keys instantly
+
+#### Hash Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version, size
+- **Field-Value**: stored at hex-encoded `key|version|field` — contains only value data
 - Version is used for fast deletion (increment version to invalidate all fields)
+
+#### List Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version, head_seq, tail_seq, size
+- **Elements**: stored at hex-encoded `key|version|seq_number` — contains element data
+- Uses sequence numbers (head_seq/tail_seq) for LPUSH/RPUSH operations
+
+#### Set Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version, size
+- **Members**: stored at hex-encoded `key|version|member` — empty value (existence = membership)
+
+#### Sorted Set Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version, size
+- **Members**: stored at hex-encoded `key|version|member` — contains 8-byte big-endian f64 score
+
+#### Bitmap Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version
+- **Fragments**: stored at hex-encoded `key|version|fragment_index` — 1 KiB fragments (8192 bits each)
+- Inspired by Linux virtual memory paging; fragment_index = bit_offset / 8192
+- LSB (Least Significant Bit) numbering within each fragment
+
+#### Bloom Filter Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version, filter_options (n, p)
+- **Sub-keys**: stored at hex-encoded `key|version|sub_key_index` — layered/cascading filter data
+
+#### HyperLogLog Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, version
+- **Segments**: stored at hex-encoded `key|version|segment_index` — 16 segments of 768 bytes each
+- Each segment holds 1024 registers × 6 bits; uses MurmurHash2 for hashing
+- 14 bits for register index, 50 bits for leading zeros count
+
+#### JSON Storage Layout
+- **Metadata**: stored at `key` — contains flags, expires_at, format (0=JSON, 1=CBOR reserved), payload
+- Simple single-key layout like String, but with an extra format byte
 
 ### Raft Integration
 - All writes go through Raft consensus via `server.set()` / `server.delete()`

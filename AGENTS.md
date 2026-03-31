@@ -339,6 +339,20 @@ cargo clippy --all-features -- -D warnings
 
 **⚠️ IMPORTANT: After every code change, ensure both commands pass with ZERO errors and ZERO warnings!**
 
+### New Command Test Gate
+
+When adding a new command, both unit tests AND integration tests MUST pass before the task is considered complete:
+
+```bash
+# Unit tests (must pass)
+cargo test
+
+# Integration tests (must pass)
+cd tests && python run_all_tests.py
+```
+
+**⚠️ IMPORTANT: A new command is NOT done until `cargo test` AND `python run_all_tests.py` both exit with zero failures!**
+
 ## Build & Run
 
 ```bash

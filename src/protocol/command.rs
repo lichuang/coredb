@@ -9,7 +9,7 @@ use crate::protocol::list::{
   LLenCommand, LPopCommand, LPushCommand, LRangeCommand, RPopCommand, RPushCommand,
 };
 use crate::protocol::resp::Value;
-use crate::protocol::set::{SAddCommand, SRemCommand};
+use crate::protocol::set::{SAddCommand, SMembersCommand, SRemCommand};
 use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
   MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
@@ -94,6 +94,7 @@ impl CommandFactory {
 
     // Register set commands
     factory.register("SADD", SAddCommand);
+    factory.register("SMEMBERS", SMembersCommand);
     factory.register("SREM", SRemCommand);
 
     // Register zset commands

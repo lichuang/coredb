@@ -535,6 +535,158 @@ class TestClusterSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_smembers_basic(self) -> bool:
+        """Test SMEMBERS returns all members of a set."""
+        print("\nTest: SMEMBERS basic")
+
+        key = "smembers_basic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SMEMBERS '{key}'...")
+        try:
+            result = write_node.smembers(key)
+            if set(result) != {"a", "b", "c"}:
+                print(f"\033[31m  FAILED: Expected {{'a','b','c'}}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SMEMBERS failed - {e}")
+            return False
+
+        print(f"  SMEMBERS returned {sorted(result)}: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_smembers_empty_set(self) -> bool:
+        """Test SMEMBERS on non-existent key returns empty set."""
+        print("\nTest: SMEMBERS empty set")
+
+        key = "smembers_empty"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  SMEMBERS '{key}' on non-existent key...")
+        try:
+            result = write_node.smembers(key)
+            if result != set():
+                print(f"\033[31m  FAILED: Expected empty set, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SMEMBERS failed - {e}")
+            return False
+
+        print("  SMEMBERS returned empty set: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_smembers_wrong_type(self) -> bool:
+        """Test SMEMBERS on a key holding wrong type."""
+        print("\nTest: SMEMBERS wrong type error")
+
+        key = "smembers_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  SMEMBERS on string key '{key}'...")
+        try:
+            write_node.smembers(key)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_smembers_after_srem(self) -> bool:
+        """Test SMEMBERS returns correct members after SREM."""
+        print("\nTest: SMEMBERS after SREM")
+
+        key = "smembers_after_srem"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c", "d")
+        write_node.srem(key, "b", "d")
+
+        print(f"  SMEMBERS '{key}' after SREM b, d...")
+        try:
+            result = write_node.smembers(key)
+            if set(result) != {"a", "c"}:
+                print(f"\033[31m  FAILED: Expected {{'a','c'}}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SMEMBERS failed - {e}")
+            return False
+
+        print(f"  SMEMBERS returned {sorted(result)}: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_smembers_replication(self) -> bool:
+        """Test that SMEMBERS data replicates to all nodes."""
+        print("\nTest: SMEMBERS replication")
+
+        key = "smembers_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "x", "y", "z")
+
+        print("  SMEMBERS from all nodes to verify replication...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.smembers(key)
+                if set(result) != {"x", "y", "z"}:
+                    print(f"    Node {i}: FAILED (expected {{'x','y','z'}}, got {result})")
+                    return False
+                print(f"    Node {i}: OK (smembers returned {sorted(result)})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_smembers_special_characters(self) -> bool:
+        """Test SMEMBERS with special characters in members."""
+        print("\nTest: SMEMBERS special characters")
+
+        key = "smembers_special"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        special_members = ["hello world", "key:value", "日本語"]
+        write_node.sadd(key, *special_members)
+
+        print(f"  SMEMBERS '{key}' with special characters...")
+        try:
+            result = write_node.smembers(key)
+            decoded = set()
+            for m in result:
+                if isinstance(m, bytes):
+                    decoded.add(m.decode("utf-8"))
+                else:
+                    decoded.add(m)
+            if decoded != set(special_members):
+                print(f"\033[31m  FAILED: Expected {set(special_members)}, got {decoded}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SMEMBERS failed - {e}")
+            return False
+
+        print(f"  SMEMBERS returned all special members: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_srem_atomicity_batch_consistency(self) -> bool:
         """Test that SREM multi-member operations are atomic (all or nothing)."""
         print("\nTest: SREM atomicity batch consistency")
@@ -601,6 +753,12 @@ class TestClusterSet(TestClusterBase):
             self.test_sadd_large_number_of_members,
             self.test_sadd_insufficient_args,
             self.test_sadd_special_characters,
+            self.test_smembers_basic,
+            self.test_smembers_empty_set,
+            self.test_smembers_wrong_type,
+            self.test_smembers_after_srem,
+            self.test_smembers_replication,
+            self.test_smembers_special_characters,
             self.test_srem_single_member,
             self.test_srem_multiple_members,
             self.test_srem_nonexistent_member,

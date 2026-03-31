@@ -225,7 +225,7 @@ print(r.get('key'))
 |---------|-------------|--------|
 | `SADD key member [member ...]` | Add member(s) to set | ✅ |
 | `SREM key member [member ...]` | Remove member(s) from set | ✅ |
-| `SMEMBERS key` | Get all members | ❌ |
+| `SMEMBERS key` | Get all members | ✅ |
 | `SISMEMBER key member` | Check if member exists | ❌ |
 | `SCARD key` | Get set cardinality | ❌ |
 | `SPOP key [count]` | Remove and return random member(s) | ❌ |

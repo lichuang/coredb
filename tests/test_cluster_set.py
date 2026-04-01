@@ -687,6 +687,200 @@ class TestClusterSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_sismember_exists(self) -> bool:
+        """Test SISMEMBER returns 1 when member exists."""
+        print("\nTest: SISMEMBER member exists")
+
+        key = "sismember_exists"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SISMEMBER '{key}' 'a'...")
+        try:
+            result = write_node.sismember(key, "a")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_not_exists(self) -> bool:
+        """Test SISMEMBER returns 0 when member does not exist."""
+        print("\nTest: SISMEMBER member does not exist")
+
+        key = "sismember_not_exists"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print(f"  SISMEMBER '{key}' 'z' (not in set)...")
+        try:
+            result = write_node.sismember(key, "z")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_nonexistent_key(self) -> bool:
+        """Test SISMEMBER on non-existent key returns 0."""
+        print("\nTest: SISMEMBER non-existent key")
+
+        key = "sismember_nokey"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  SISMEMBER '{key}' 'a' on non-existent key...")
+        try:
+            result = write_node.sismember(key, "a")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_wrong_type(self) -> bool:
+        """Test SISMEMBER on a key holding wrong type."""
+        print("\nTest: SISMEMBER wrong type error")
+
+        key = "sismember_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  SISMEMBER on string key '{key}'...")
+        try:
+            write_node.sismember(key, "member")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_replication(self) -> bool:
+        """Test that SISMEMBER works on all replicated nodes."""
+        print("\nTest: SISMEMBER replication")
+
+        key = "sismember_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+
+        print("  SISMEMBER from all nodes to verify replication...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.sismember(key, "a")
+                if result != 1:
+                    print(f"    Node {i}: FAILED (expected 1, got {result})")
+                    return False
+                print(f"    Node {i}: OK (sismember returned 1)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_after_srem(self) -> bool:
+        """Test SISMEMBER returns 0 after member is removed."""
+        print("\nTest: SISMEMBER after SREM")
+
+        key = "sismember_after_srem"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "a", "b", "c")
+        write_node.srem(key, "a")
+
+        print(f"  SISMEMBER '{key}' 'a' after SREM...")
+        try:
+            result = write_node.sismember(key, "a")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_empty_member(self) -> bool:
+        """Test SISMEMBER with empty string member."""
+        print("\nTest: SISMEMBER empty member")
+
+        key = "sismember_empty"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.sadd(key, "")
+
+        print(f"  SISMEMBER '{key}' ''...")
+        try:
+            result = write_node.sismember(key, "")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_sismember_special_characters(self) -> bool:
+        """Test SISMEMBER with special characters in member."""
+        print("\nTest: SISMEMBER special characters")
+
+        key = "sismember_special"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        special_member = "hello world"
+        write_node.sadd(key, special_member)
+
+        print(f"  SISMEMBER '{key}' '{special_member}'...")
+        try:
+            result = write_node.sismember(key, special_member)
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: SISMEMBER failed - {e}")
+            return False
+
+        print("  SISMEMBER returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_srem_atomicity_batch_consistency(self) -> bool:
         """Test that SREM multi-member operations are atomic (all or nothing)."""
         print("\nTest: SREM atomicity batch consistency")
@@ -759,6 +953,14 @@ class TestClusterSet(TestClusterBase):
             self.test_smembers_after_srem,
             self.test_smembers_replication,
             self.test_smembers_special_characters,
+            self.test_sismember_exists,
+            self.test_sismember_not_exists,
+            self.test_sismember_nonexistent_key,
+            self.test_sismember_wrong_type,
+            self.test_sismember_replication,
+            self.test_sismember_after_srem,
+            self.test_sismember_empty_member,
+            self.test_sismember_special_characters,
             self.test_srem_single_member,
             self.test_srem_multiple_members,
             self.test_srem_nonexistent_member,

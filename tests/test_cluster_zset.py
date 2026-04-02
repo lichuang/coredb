@@ -506,6 +506,252 @@ class TestClusterZSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_zrem_single_member(self) -> bool:
+        """Test ZREM removes a single member."""
+        print("\nTest: ZREM single member")
+
+        key = "zrem_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print(f"  ZREM '{key}' 'a'...")
+        try:
+            result = write_node.zrem(key, "a")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZREM returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_multiple_members(self) -> bool:
+        """Test ZREM removes multiple members at once."""
+        print("\nTest: ZREM multiple members")
+
+        key = "zrem_multi"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0})
+
+        print(f"  ZREM '{key}' a b c...")
+        try:
+            result = write_node.zrem(key, "a", "b", "c")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZREM returned 3: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_nonexistent_member(self) -> bool:
+        """Test ZREM with non-existent member returns 0."""
+        print("\nTest: ZREM non-existent member")
+
+        key = "zrem_nonexist"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0})
+
+        print(f"  ZREM '{key}' 'nonexistent'...")
+        try:
+            result = write_node.zrem(key, "nonexistent")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZREM returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_nonexistent_key(self) -> bool:
+        """Test ZREM on non-existent key returns 0."""
+        print("\nTest: ZREM non-existent key")
+
+        key = "zrem_nokey"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  ZREM '{key}' 'a'...")
+        try:
+            result = write_node.zrem(key, "a")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZREM returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_mixed_existing_and_nonexistent(self) -> bool:
+        """Test ZREM with mix of existing and non-existing members."""
+        print("\nTest: ZREM mixed existing and non-existing")
+
+        key = "zrem_mixed"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZREM '{key}' a nonexistent b...")
+        try:
+            result = write_node.zrem(key, "a", "nonexistent", "b")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2 (a and b exist), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZREM returned 2: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_wrong_type(self) -> bool:
+        """Test ZREM on a key holding wrong type."""
+        print("\nTest: ZREM wrong type error")
+
+        key = "zrem_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  ZREM on string key '{key}'...")
+        try:
+            write_node.zrem(key, "member")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_replication(self) -> bool:
+        """Test that ZREM replicates to all nodes."""
+        print("\nTest: ZREM replication")
+
+        key = "zrem_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print(f"  ZREM '{key}' a b on random node...")
+        try:
+            result = write_node.zrem(key, "a", "b")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  ZADD c from all nodes to verify only c remains...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.zadd(key, {"c": 3.0})
+                if result != 0:
+                    print(f"    Node {i}: FAILED (expected 0, c already exists, got {result})")
+                    return False
+                print(f"    Node {i}: OK (c exists, a/b removed)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_all_members(self) -> bool:
+        """Test ZREM removing all members empties the sorted set."""
+        print("\nTest: ZREM all members")
+
+        key = "zrem_all"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZREM '{key}' a b (all members)...")
+        try:
+            result = write_node.zrem(key, "a", "b")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  Verifying ZADD after removing all members...")
+        try:
+            result = write_node.zadd(key, {"c": 3.0})
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1 (new member after empty), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZADD after ZREM all failed - {e}")
+            return False
+
+        print("  ZREM all + ZADD new returned 1: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrem_atomicity_batch_consistency(self) -> bool:
+        """Test that ZREM is atomic - all or nothing."""
+        print("\nTest: ZREM atomicity batch consistency")
+
+        key = "zrem_atomic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print(f"  ZREM '{key}' a nonexistent c...")
+        try:
+            result = write_node.zrem(key, "a", "nonexistent", "c")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2 (a and c exist), got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREM failed - {e}")
+            return False
+
+        print("  Verifying b still exists...")
+        try:
+            result = write_node.zadd(key, {"b": 2.0})
+            if result != 0:
+                print(f"\033[31m  FAILED: b should still exist, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZADD check failed - {e}")
+            return False
+
+        print("  ZREM atomic: b preserved, a and c removed: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all zset tests."""
         print("\n" + "=" * 50)
@@ -533,6 +779,15 @@ class TestClusterZSet(TestClusterBase):
             self.test_zadd_special_characters,
             self.test_zadd_zero_score,
             self.test_zadd_nx_xx_conflict,
+            self.test_zrem_single_member,
+            self.test_zrem_multiple_members,
+            self.test_zrem_nonexistent_member,
+            self.test_zrem_nonexistent_key,
+            self.test_zrem_mixed_existing_and_nonexistent,
+            self.test_zrem_wrong_type,
+            self.test_zrem_replication,
+            self.test_zrem_all_members,
+            self.test_zrem_atomicity_batch_consistency,
         ]
 
         passed = 0

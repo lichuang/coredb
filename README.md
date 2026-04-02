@@ -239,7 +239,7 @@ print(r.get('key'))
 | Command | Description | Status |
 |---------|-------------|--------|
 | `ZADD key [NX\|XX] [GT\|LT] [CH] [INCR] score member [score member ...]` | Add member(s) with score | ✅ |
-| `ZREM key member [member ...]` | Remove member(s) | ❌ |
+| `ZREM key member [member ...]` | Remove member(s) | ✅ |
 | `ZRANGE key start stop [WITHSCORES]` | Get range by rank | ❌ |
 | `ZREVRANGE key start stop [WITHSCORES]` | Get range by rank (reverse) | ❌ |
 | `ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]` | Get range by score | ❌ |

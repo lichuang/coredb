@@ -14,7 +14,7 @@ use crate::protocol::string::{
   AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
   MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
 };
-use crate::protocol::zset::{ZAddCommand, ZRemCommand};
+use crate::protocol::zset::{ZAddCommand, ZRangeCommand, ZRemCommand};
 use crate::server::Server;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -100,6 +100,7 @@ impl CommandFactory {
 
     // Register zset commands
     factory.register("ZADD", ZAddCommand);
+    factory.register("ZRANGE", ZRangeCommand);
     factory.register("ZREM", ZRemCommand);
 
     // Register bitmap commands

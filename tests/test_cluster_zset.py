@@ -752,6 +752,273 @@ class TestClusterZSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    # ==================== ZRANGE Tests ====================
+
+    def test_zrange_basic(self) -> bool:
+        """Test ZRANGE returns members in ascending score order."""
+        print("\nTest: ZRANGE basic")
+
+        key = "zrange_basic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"c": 3.0, "a": 1.0, "b": 2.0})
+
+        print(f"  ZRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrange(key, 0, -1)
+            if result != ["a", "b", "c"]:
+                print(f"\033[31m  FAILED: Expected ['a', 'b', 'c'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE returned ['a', 'b', 'c']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_with_scores(self) -> bool:
+        """Test ZRANGE WITHSCORES returns member-score pairs."""
+        print("\nTest: ZRANGE WITHSCORES")
+
+        key = "zrange_scores"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print(f"  ZRANGE '{key}' 0 -1 WITHSCORES...")
+        try:
+            result = write_node.zrange(key, 0, -1, withscores=True)
+            expected = [("a", 1.0), ("b", 2.0), ("c", 3.0)]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE WITHSCORES returned correct pairs: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_subset(self) -> bool:
+        """Test ZRANGE with positive start and stop indices."""
+        print("\nTest: ZRANGE subset")
+
+        key = "zrange_subset"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0})
+
+        print(f"  ZRANGE '{key}' 1 3...")
+        try:
+            result = write_node.zrange(key, 1, 3)
+            if result != ["b", "c", "d"]:
+                print(f"\033[31m  FAILED: Expected ['b', 'c', 'd'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE 1 3 returned ['b', 'c', 'd']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_negative_indices(self) -> bool:
+        """Test ZRANGE with negative start and stop indices."""
+        print("\nTest: ZRANGE negative indices")
+
+        key = "zrange_neg"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0})
+
+        print(f"  ZRANGE '{key}' -3 -1...")
+        try:
+            result = write_node.zrange(key, -3, -1)
+            if result != ["b", "c", "d"]:
+                print(f"\033[31m  FAILED: Expected ['b', 'c', 'd'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE -3 -1 returned ['b', 'c', 'd']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_start_greater_than_stop(self) -> bool:
+        """Test ZRANGE returns empty when start > stop."""
+        print("\nTest: ZRANGE start > stop")
+
+        key = "zrange_empty"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZRANGE '{key}' 2 1...")
+        try:
+            result = write_node.zrange(key, 2, 1)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE 2 1 returned []: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_out_of_range(self) -> bool:
+        """Test ZRANGE with indices beyond the set size."""
+        print("\nTest: ZRANGE out of range")
+
+        key = "zrange_oor"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZRANGE '{key}' 0 100...")
+        try:
+            result = write_node.zrange(key, 0, 100)
+            if result != ["a", "b"]:
+                print(f"\033[31m  FAILED: Expected ['a', 'b'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE 0 100 returned ['a', 'b']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_nonexistent_key(self) -> bool:
+        """Test ZRANGE on a non-existent key returns empty array."""
+        print("\nTest: ZRANGE non-existent key")
+
+        key = "zrange_noexist"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  ZRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrange(key, 0, -1)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE on non-existent key returned []: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_wrong_type(self) -> bool:
+        """Test ZRANGE on a key holding wrong type."""
+        print("\nTest: ZRANGE wrong type error")
+
+        key = "zrange_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  ZRANGE on string key '{key}'...")
+        try:
+            write_node.zrange(key, 0, -1)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_single_element(self) -> bool:
+        """Test ZRANGE with a single element sorted set."""
+        print("\nTest: ZRANGE single element")
+
+        key = "zrange_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"only": 42.0})
+
+        print(f"  ZRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrange(key, 0, -1)
+            if result != ["only"]:
+                print(f"\033[31m  FAILED: Expected ['only'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE returned ['only']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_equal_scores(self) -> bool:
+        """Test ZRANGE with equal scores uses lexicographic member order."""
+        print("\nTest: ZRANGE equal scores")
+
+        key = "zrange_equal"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"c": 1.0, "a": 1.0, "b": 1.0})
+
+        print(f"  ZRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrange(key, 0, -1)
+            if result != ["a", "b", "c"]:
+                print(f"\033[31m  FAILED: Expected ['a', 'b', 'c'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZRANGE failed - {e}")
+            return False
+
+        print("  ZRANGE returned ['a', 'b', 'c'] (lexicographic): OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrange_replication(self) -> bool:
+        """Test that ZRANGE reads replicated data from all nodes."""
+        print("\nTest: ZRANGE replication")
+
+        key = "zrange_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print("  ZRANGE from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.zrange(key, 0, -1)
+                if result != ["a", "b", "c"]:
+                    print(f"    Node {i}: FAILED (expected ['a', 'b', 'c'], got {result})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all zset tests."""
         print("\n" + "=" * 50)
@@ -788,6 +1055,17 @@ class TestClusterZSet(TestClusterBase):
             self.test_zrem_replication,
             self.test_zrem_all_members,
             self.test_zrem_atomicity_batch_consistency,
+            self.test_zrange_basic,
+            self.test_zrange_with_scores,
+            self.test_zrange_subset,
+            self.test_zrange_negative_indices,
+            self.test_zrange_start_greater_than_stop,
+            self.test_zrange_out_of_range,
+            self.test_zrange_nonexistent_key,
+            self.test_zrange_wrong_type,
+            self.test_zrange_single_element,
+            self.test_zrange_equal_scores,
+            self.test_zrange_replication,
         ]
 
         passed = 0

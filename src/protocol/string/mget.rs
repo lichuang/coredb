@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::ProtocolError;
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -12,10 +13,9 @@ pub struct MgetParams {
 }
 
 impl MgetParams {
-  /// Parse MGET command parameters from RESP array items
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() < 2 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("MGET"));
     }
 
     let mut keys = Vec::with_capacity(items.len() - 1);
@@ -23,12 +23,12 @@ impl MgetParams {
       let key = match item {
         Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
         Value::SimpleString(s) => s.clone(),
-        _ => return None,
+        _ => return Err(ProtocolError::InvalidArgument("key")),
       };
       keys.push(key);
     }
 
-    Some(MgetParams { keys })
+    Ok(MgetParams { keys })
   }
 }
 
@@ -40,15 +40,12 @@ async fn get_value_check_expiry(server: &Server, key: &str) -> Option<Vec<u8>> {
     _ => return None,
   };
 
-  // Deserialize and check expiration
   let string_value = match StringValue::deserialize(&raw_value) {
     Ok(v) => v,
     Err(_) => return None,
   };
 
-  // Check if expired
   if string_value.is_expired(now_ms()) {
-    // Lazily delete the expired key
     let _ = server.delete(key).await;
     return None;
   }
@@ -61,22 +58,23 @@ pub struct MgetCommand;
 
 #[async_trait]
 impl Command for MgetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match MgetParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'mget' command"),
-    };
+  async fn execute(
+    &self,
+    items: &[Value],
+    server: &Server,
+  ) -> Result<Value, crate::error::CoreDbError> {
+    let params = MgetParams::parse(items)?;
 
     let mut results = Vec::with_capacity(params.keys.len());
 
     for key in &params.keys {
       match get_value_check_expiry(server, key).await {
         Some(data) => results.push(Value::BulkString(Some(data))),
-        None => results.push(Value::BulkString(None)), // Key not found or expired
+        None => results.push(Value::BulkString(None)),
       }
     }
 
-    Value::Array(Some(results))
+    Ok(Value::Array(Some(results)))
   }
 }
 
@@ -109,7 +107,7 @@ mod tests {
   #[test]
   fn test_mget_params_parse_no_keys() {
     let items = vec![Value::BulkString(Some(b"MGET".to_vec()))];
-    assert!(MgetParams::parse(&items).is_none());
+    assert!(MgetParams::parse(&items).is_err());
   }
 
   #[test]

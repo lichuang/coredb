@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -8,48 +9,40 @@ use rockraft::raft::types::UpsertKV;
 /// Parameters for MSET command
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsetParams {
-  /// Key-value pairs to set
   pub pairs: Vec<(String, Vec<u8>)>,
 }
 
 impl MsetParams {
-  /// Parse MSET command parameters from RESP array items
-  /// Format: MSET key value [key value ...]
-  fn parse(items: &[Value]) -> Option<Self> {
-    // Minimum: MSET + at least one key-value pair
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() < 3 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("MSET"));
     }
 
-    // Must have an even number of arguments after MSET
-    // items[0] = MSET, items[1..] should be pairs
     let args_count = items.len() - 1;
     if !args_count.is_multiple_of(2) {
-      return None;
+      return Err(ProtocolError::WrongArgCount("MSET"));
     }
 
     let mut pairs = Vec::with_capacity(args_count / 2);
     let mut i = 1;
     while i < items.len() {
-      // Parse key
       let key = match &items[i] {
         Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
         Value::SimpleString(s) => s.clone(),
-        _ => return None,
+        _ => return Err(ProtocolError::InvalidArgument("key")),
       };
 
-      // Parse value
       let value = match &items[i + 1] {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return None,
+        _ => return Err(ProtocolError::InvalidArgument("value")),
       };
 
       pairs.push((key, value));
       i += 2;
     }
 
-    Some(MsetParams { pairs })
+    Ok(MsetParams { pairs })
   }
 }
 
@@ -58,14 +51,9 @@ pub struct MsetCommand;
 
 #[async_trait]
 impl Command for MsetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match MsetParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'mset' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = MsetParams::parse(items)?;
 
-    // Prepare batch write entries
-    // MSET always overwrites existing values (no TTL preservation)
     let mut entries: Vec<UpsertKV> = Vec::with_capacity(params.pairs.len());
 
     for (key, value) in params.pairs {
@@ -74,12 +62,8 @@ impl Command for MsetCommand {
       entries.push(UpsertKV::insert(&key, &serialized));
     }
 
-    // Atomic batch write - all or nothing
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR batch write failed: {}", e));
-    }
-
-    Value::ok()
+    server.batch_write(entries).await?;
+    Ok(Value::ok())
   }
 }
 
@@ -124,29 +108,27 @@ mod tests {
   #[test]
   fn test_mset_params_parse_no_pairs() {
     let items = vec![Value::BulkString(Some(b"MSET".to_vec()))];
-    assert!(MsetParams::parse(&items).is_none());
+    assert!(MsetParams::parse(&items).is_err());
   }
 
   #[test]
   fn test_mset_params_parse_missing_value() {
-    // Only key without value
     let items = vec![
       Value::BulkString(Some(b"MSET".to_vec())),
       Value::BulkString(Some(b"key1".to_vec())),
     ];
-    assert!(MsetParams::parse(&items).is_none());
+    assert!(MsetParams::parse(&items).is_err());
   }
 
   #[test]
   fn test_mset_params_parse_odd_arguments() {
-    // key1 value1 key2 (missing value2)
     let items = vec![
       Value::BulkString(Some(b"MSET".to_vec())),
       Value::BulkString(Some(b"key1".to_vec())),
       Value::BulkString(Some(b"value1".to_vec())),
       Value::BulkString(Some(b"key2".to_vec())),
     ];
-    assert!(MsetParams::parse(&items).is_none());
+    assert!(MsetParams::parse(&items).is_err());
   }
 
   #[test]
@@ -196,10 +178,10 @@ mod tests {
   fn test_mset_params_parse_invalid_key_type() {
     let items = vec![
       Value::BulkString(Some(b"MSET".to_vec())),
-      Value::Integer(123), // Invalid key type
+      Value::Integer(123),
       Value::BulkString(Some(b"value1".to_vec())),
     ];
-    assert!(MsetParams::parse(&items).is_none());
+    assert!(MsetParams::parse(&items).is_err());
   }
 
   #[test]
@@ -207,8 +189,8 @@ mod tests {
     let items = vec![
       Value::BulkString(Some(b"MSET".to_vec())),
       Value::BulkString(Some(b"key1".to_vec())),
-      Value::Integer(123), // Invalid value type
+      Value::Integer(123),
     ];
-    assert!(MsetParams::parse(&items).is_none());
+    assert!(MsetParams::parse(&items).is_err());
   }
 }

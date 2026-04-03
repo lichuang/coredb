@@ -6,9 +6,9 @@
 //! Return value:
 //! - Integer: number of fields in the hash
 //! - 0 if key does not exist
-//! - Error if key exists but is not a hash
 
 use crate::encoding::HashMetadata;
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -20,43 +20,43 @@ pub struct HLenCommand;
 
 #[async_trait]
 impl Command for HLenCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse HLEN key (exactly 2 items: command + key)
     if items.len() != 2 {
-      return Value::error("ERR wrong number of arguments for 'hlen' command");
+      return Err(ProtocolError::WrongArgCount("hlen").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => match HashMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
             // Expired, return 0
-            return Value::Integer(0);
+            return Ok(Value::Integer(0));
           }
           meta
         }
         Err(_) => {
           // Corrupted metadata, return 0
-          return Value::Integer(0);
+          return Ok(Value::Integer(0));
         }
       },
-      _ => {
+      None => {
         // Key not found, return 0
-        return Value::Integer(0);
+        return Ok(Value::Integer(0));
       }
     };
 
     // Return the size from metadata
-    Value::Integer(metadata.size as i64)
+    Ok(Value::Integer(metadata.size as i64))
   }
 }
 

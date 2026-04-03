@@ -9,6 +9,7 @@
 //! - Error if key exists but is not a set
 
 use crate::encoding::{SetMemberValue, SetMetadata, TYPE_SET};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -20,58 +21,56 @@ pub struct SIsMemberCommand;
 
 #[async_trait]
 impl Command for SIsMemberCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // SISMEMBER key member (exactly 3 items: command + key + member)
     if items.len() != 3 {
-      return Value::error("ERR wrong number of arguments for 'sismember' command");
+      return Err(ProtocolError::WrongArgCount("sismember").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Parse member
     let member = match &items[2] {
       Value::BulkString(Some(data)) => data.clone(),
       Value::SimpleString(s) => s.as_bytes().to_vec(),
-      _ => return Value::error("ERR invalid member"),
+      _ => return Err(ProtocolError::InvalidArgument("member").into()),
     };
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => match SetMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => match SetMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_SET {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           // Check if expired
           if meta.is_expired(now_ms()) {
-            return Value::Integer(0);
+            return Ok(Value::Integer(0));
           }
           meta
         }
         Err(_) => {
-          return Value::Integer(0);
+          return Ok(Value::Integer(0));
         }
       },
-      _ => {
+      None => {
         // Key not found
-        return Value::Integer(0);
+        return Ok(Value::Integer(0));
       }
     };
 
     // Check if member exists by looking up the sub-key
     let sub_key_str = SetMemberValue::build_sub_key_hex(key.as_bytes(), metadata.version, &member);
 
-    match server.get(&sub_key_str).await {
-      Ok(Some(_)) => Value::Integer(1),
-      _ => Value::Integer(0),
-    }
+    Ok(match server.get(&sub_key_str).await? {
+      Some(_) => Value::Integer(1),
+      None => Value::Integer(0),
+    })
   }
 }
 

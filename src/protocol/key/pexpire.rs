@@ -3,20 +3,10 @@
 //! PEXPIRE key milliseconds [NX | XX | GT | LT]
 //!
 //! Set a timeout on key in milliseconds. After the timeout has expired,
-//! the key will automatically be deleted. Works on any data type
-//! (string, hash, etc.).
-//!
-//! Options:
-//! - NX: Only set the expiration if the key has no associated expiration
-//! - XX: Only set the expiration if the key already has an expiration
-//! - GT: Only set the expiration if the new expiration is greater than current one
-//! - LT: Only set the expiration if the new expiration is less than current one
-//!
-//! Returns:
-//! - Integer 1: the timeout was set
-//! - Integer 0: the timeout was not set (key does not exist, or condition not met)
+//! the key will automatically be deleted. Works on any data type.
 
 use crate::encoding::{HashMetadata, StringValue};
+use crate::error::{CoreDbError, EncodeError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::key::expire::{ExpireCondition, KeyState, read_key_state};
 use crate::protocol::resp::Value;
@@ -45,26 +35,26 @@ fn parse_i64(value: &Value) -> Option<i64> {
 impl PexpireParams {
   /// Parse PEXPIRE command parameters from RESP array items
   /// Format: PEXPIRE key milliseconds [NX | XX | GT | LT]
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     // Need at least: PEXPIRE key milliseconds (3 items)
     if items.len() < 3 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("pexpire"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::WrongArgCount("pexpire")),
     };
 
-    let milliseconds = parse_i64(&items[2])?;
+    let milliseconds = parse_i64(&items[2]).ok_or(ProtocolError::NotAnInteger)?;
 
     // Parse optional condition flag
     let condition = if items.len() >= 4 {
       let flag = match &items[3] {
         Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_uppercase(),
         Value::SimpleString(s) => s.to_uppercase(),
-        _ => return None,
+        _ => return Err(ProtocolError::WrongArgCount("pexpire")),
       };
 
       match flag.as_str() {
@@ -72,13 +62,13 @@ impl PexpireParams {
         "XX" => Some(ExpireCondition::Xx),
         "GT" => Some(ExpireCondition::Gt),
         "LT" => Some(ExpireCondition::Lt),
-        _ => return None,
+        _ => return Err(ProtocolError::SyntaxError),
       }
     } else {
       None
     };
 
-    Some(PexpireParams {
+    Ok(PexpireParams {
       key,
       milliseconds,
       condition,
@@ -91,29 +81,21 @@ pub struct PexpireCommand;
 
 #[async_trait]
 impl Command for PexpireCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match PexpireParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'pexpire' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = PexpireParams::parse(items)?;
 
     // Negative milliseconds: delete the key immediately
     if params.milliseconds < 0 {
-      match server.delete(&params.key).await {
-        Ok(_) => return Value::Integer(1),
-        Err(e) => return Value::error(format!("ERR failed to delete key: {}", e)),
-      }
+      server.delete(&params.key).await?;
+      return Ok(Value::Integer(1));
     }
 
     // Read current key state
-    let key_state = match read_key_state(server, &params.key).await {
-      Ok(state) => state,
-      Err(e) => return Value::error(format!("ERR failed to read key '{}': {}", params.key, e)),
-    };
+    let key_state = read_key_state(server, &params.key).await?;
 
     // Key must exist (not expired or missing)
     let (current_expires_at, flags) = match key_state {
-      KeyState::NotFound | KeyState::Expired => return Value::Integer(0),
+      KeyState::NotFound | KeyState::Expired => return Ok(Value::Integer(0)),
       KeyState::String(sv) => (sv.expires_at, sv.flags),
       KeyState::Hash(hm) => (hm.expires_at, hm.flags),
     };
@@ -124,10 +106,8 @@ impl Command for PexpireCommand {
 
     // Zero milliseconds: delete the key immediately
     if params.milliseconds == 0 {
-      match server.delete(&params.key).await {
-        Ok(_) => return Value::Integer(1),
-        Err(e) => return Value::error(format!("ERR failed to delete key: {}", e)),
-      }
+      server.delete(&params.key).await?;
+      return Ok(Value::Integer(1));
     }
 
     // Check expire condition
@@ -152,42 +132,33 @@ impl Command for PexpireCommand {
     };
 
     if !should_set {
-      return Value::Integer(0);
+      return Ok(Value::Integer(0));
     }
 
     // Re-read and reconstruct the value with updated expiration
-    let raw_value = match server.get(&params.key).await {
-      Ok(Some(v)) => v,
-      Ok(None) => return Value::Integer(0), // Key disappeared between reads
-      Err(e) => return Value::error(format!("ERR failed to read key '{}': {}", params.key, e)),
+    let raw_value = match server.get(&params.key).await? {
+      Some(v) => v,
+      None => return Ok(Value::Integer(0)), // Key disappeared between reads
     };
 
     let data_type = flags & 0x0F;
     let new_value = if data_type == crate::encoding::TYPE_STRING {
-      match StringValue::deserialize(&raw_value) {
-        Ok(mut sv) => {
-          sv.expires_at = new_expires_at;
-          sv.serialize()
-        }
-        Err(_) => return Value::error(format!("ERR failed to deserialize key '{}'", params.key)),
-      }
+      let mut sv = StringValue::deserialize(&raw_value)
+        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
+      sv.expires_at = new_expires_at;
+      sv.serialize()
     } else if data_type == crate::encoding::TYPE_HASH {
-      match HashMetadata::deserialize(&raw_value) {
-        Ok(mut hm) => {
-          hm.expires_at = new_expires_at;
-          hm.serialize()
-        }
-        Err(_) => return Value::error(format!("ERR failed to deserialize key '{}'", params.key)),
-      }
+      let mut hm = HashMetadata::deserialize(&raw_value)
+        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
+      hm.expires_at = new_expires_at;
+      hm.serialize()
     } else {
-      return Value::error(format!("ERR unsupported key type for '{}'", params.key));
+      return Err(ProtocolError::Custom("ERR unsupported key type").into());
     };
 
     // Write the updated value back
-    match server.set(params.key, new_value).await {
-      Ok(_) => Value::Integer(1),
-      Err(e) => Value::error(format!("ERR failed to set key: {}", e)),
-    }
+    server.set(params.key, new_value).await?;
+    Ok(Value::Integer(1))
   }
 }
 
@@ -260,20 +231,17 @@ mod tests {
 
   #[test]
   fn test_pexpire_params_parse_insufficient_args() {
-    // Only PEXPIRE key (missing milliseconds)
     let items = vec![
       Value::BulkString(Some(b"PEXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
     ];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
 
-    // Only PEXPIRE
     let items = vec![Value::BulkString(Some(b"PEXPIRE".to_vec()))];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
 
-    // Empty
     let items: Vec<Value> = vec![];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -283,7 +251,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"not_a_number".to_vec())),
     ];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -293,7 +261,7 @@ mod tests {
       Value::Integer(123),
       Value::BulkString(Some(b"60000".to_vec())),
     ];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -304,7 +272,7 @@ mod tests {
       Value::BulkString(Some(b"60000".to_vec())),
       Value::BulkString(Some(b"UNKNOWN".to_vec())),
     ];
-    assert!(PexpireParams::parse(&items).is_none());
+    assert!(PexpireParams::parse(&items).is_err());
   }
 
   #[test]

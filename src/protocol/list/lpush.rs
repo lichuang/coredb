@@ -14,6 +14,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{ListElementValue, ListMetadata, TYPE_LIST};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -26,19 +27,17 @@ pub struct LPushCommand;
 impl LPushCommand {
   /// Parse arguments from RESP items
   /// Format: LPUSH key element [element ...]
-  fn parse_args(items: &[Value]) -> Result<LPushArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<LPushArgs, ProtocolError> {
     // Minimum: LPUSH key element (3 items)
     if items.len() < 3 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'lpush' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("lpush"));
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     // Parse elements from items[2..]
@@ -47,7 +46,7 @@ impl LPushCommand {
       let elem = match item {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Err(Value::error("ERR invalid element")),
+        _ => return Err(ProtocolError::InvalidArgument("element")),
       };
       elements.push(elem);
     }
@@ -64,22 +63,17 @@ struct LPushArgs {
 
 #[async_trait]
 impl Command for LPushCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse arguments
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+    let args = Self::parse_args(items)?;
 
     // Get or create metadata
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ListMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ListMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if it's actually a list type
           if meta.get_type() != TYPE_LIST {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           // Check if expired
           if meta.is_expired(now_ms()) {
@@ -93,7 +87,7 @@ impl Command for LPushCommand {
           ListMetadata::new()
         }
       },
-      _ => {
+      None => {
         // Not found, create new
         ListMetadata::new()
       }
@@ -124,12 +118,10 @@ impl Command for LPushCommand {
     entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
     // Perform atomic batch write
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
     // Return the new length of the list
-    Value::Integer(metadata.size as i64)
+    Ok(Value::Integer(metadata.size as i64))
   }
 }
 

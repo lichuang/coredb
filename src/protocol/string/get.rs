@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::{CoreDbError, CoreDbResult, EncodeError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -13,24 +14,24 @@ pub struct GetParams {
 
 impl GetParams {
   /// Parse GET command parameters from RESP array items
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() != 2 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("GET"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
-    Some(GetParams { key })
+    Ok(GetParams { key })
   }
 }
 
 /// Get a value from the server, checking for expiration.
 /// Returns (value, expired) where `expired` is true if the key was expired and deleted.
-async fn get_value_check_expiry(server: &Server, key: &str) -> Result<Option<Vec<u8>>, String> {
+async fn get_value_check_expiry(server: &Server, key: &str) -> CoreDbResult<Option<Vec<u8>>> {
   let raw_value = match server.get(key).await? {
     Some(v) => v,
     None => return Ok(None),
@@ -39,7 +40,9 @@ async fn get_value_check_expiry(server: &Server, key: &str) -> Result<Option<Vec
   // Deserialize and check expiration
   let string_value = match StringValue::deserialize(&raw_value) {
     Ok(v) => v,
-    Err(_) => return Err("corrupted value".to_string()),
+    Err(_) => {
+      return Err(EncodeError::DeserializeFailed("StringValue".to_string()).into());
+    }
   };
 
   // Check if expired
@@ -57,16 +60,12 @@ pub struct GetCommand;
 
 #[async_trait]
 impl Command for GetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match GetParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'get' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = GetParams::parse(items)?;
 
-    match get_value_check_expiry(server, &params.key).await {
-      Ok(Some(data)) => Value::BulkString(Some(data)),
-      Ok(None) => Value::BulkString(None), // Key not found or expired
-      Err(e) => Value::error(format!("ERR {}", e)),
+    match get_value_check_expiry(server, &params.key).await? {
+      Some(data) => Ok(Value::BulkString(Some(data))),
+      None => Ok(Value::BulkString(None)), // Key not found or expired
     }
   }
 }
@@ -88,6 +87,6 @@ mod tests {
   #[test]
   fn test_get_params_parse_wrong_args() {
     let items = vec![Value::BulkString(Some(b"GET".to_vec()))];
-    assert!(GetParams::parse(&items).is_none());
+    assert!(GetParams::parse(&items).is_err());
   }
 }

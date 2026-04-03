@@ -6,7 +6,6 @@ mod server;
 mod util;
 
 use std::env;
-use std::io::Result;
 use std::process::exit;
 use std::sync::Arc;
 
@@ -17,7 +16,7 @@ use config::Config;
 use server::Server;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // Initialize logging
   tracing_subscriber::fmt()
     .with_env_filter(

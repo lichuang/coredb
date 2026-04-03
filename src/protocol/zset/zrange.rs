@@ -13,6 +13,7 @@
 //! - WRONGTYPE error if key exists but is not a sorted set
 
 use crate::encoding::{TYPE_ZSET, ZSetMemberValue, ZSetMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -32,43 +33,35 @@ struct ZRangeArgs {
 
 impl ZRangeCommand {
   /// Parse ZRANGE arguments: ZRANGE key start stop [WITHSCORES]
-  fn parse_args(items: &[Value]) -> Result<ZRangeArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<ZRangeArgs, ProtocolError> {
     if items.len() < 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'zrange' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("zrange"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let start = match &items[2] {
       Value::BulkString(Some(data)) => {
         let s = String::from_utf8_lossy(data);
-        s.parse::<i64>()
-          .map_err(|_| Value::error("ERR value is not an integer or out of range"))?
+        s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?
       }
-      Value::SimpleString(s) => s
-        .parse::<i64>()
-        .map_err(|_| Value::error("ERR value is not an integer or out of range"))?,
+      Value::SimpleString(s) => s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?,
       Value::Integer(n) => *n,
-      _ => return Err(Value::error("ERR value is not an integer or out of range")),
+      _ => return Err(ProtocolError::NotAnInteger),
     };
 
     let stop = match &items[3] {
       Value::BulkString(Some(data)) => {
         let s = String::from_utf8_lossy(data);
-        s.parse::<i64>()
-          .map_err(|_| Value::error("ERR value is not an integer or out of range"))?
+        s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?
       }
-      Value::SimpleString(s) => s
-        .parse::<i64>()
-        .map_err(|_| Value::error("ERR value is not an integer or out of range"))?,
+      Value::SimpleString(s) => s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?,
       Value::Integer(n) => *n,
-      _ => return Err(Value::error("ERR value is not an integer or out of range")),
+      _ => return Err(ProtocolError::NotAnInteger),
     };
 
     // Check for WITHSCORES flag
@@ -97,29 +90,24 @@ impl ZRangeCommand {
 
 #[async_trait]
 impl Command for ZRangeCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
     // Get metadata
-    let metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ZSetMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ZSetMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_ZSET {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
-            return Value::Array(Some(vec![]));
+            return Ok(Value::Array(Some(vec![])));
           }
           meta
         }
-        Err(_) => return Value::Array(Some(vec![])),
+        Err(_) => return Ok(Value::Array(Some(vec![]))),
       },
-      _ => return Value::Array(Some(vec![])),
+      None => return Ok(Value::Array(Some(vec![]))),
     };
 
     let version = metadata.version;
@@ -128,10 +116,7 @@ impl Command for ZRangeCommand {
     let prefix_hex = build_member_prefix_hex(args.key.as_bytes(), version);
 
     // Scan for all member sub-keys
-    let scan_results = match server.scan_prefix(prefix_hex.as_bytes()).await {
-      Ok(results) => results,
-      Err(e) => return Value::error(format!("ERR failed to scan zset members: {}", e)),
-    };
+    let scan_results = server.scan_prefix(prefix_hex.as_bytes()).await?;
 
     // Parse results into (member, score) pairs
     let mut members: Vec<(Vec<u8>, f64)> = Vec::with_capacity(scan_results.len());
@@ -178,7 +163,7 @@ impl Command for ZRangeCommand {
 
     // If start > stop or start > len, return empty array
     if start > stop || start >= len {
-      return Value::Array(Some(vec![]));
+      return Ok(Value::Array(Some(vec![])));
     }
 
     // Clamp stop to len-1
@@ -197,7 +182,7 @@ impl Command for ZRangeCommand {
       }
     }
 
-    Value::Array(Some(result))
+    Ok(Value::Array(Some(result)))
   }
 }
 

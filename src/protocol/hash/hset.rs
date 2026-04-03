@@ -12,6 +12,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{HashFieldValue, HashMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -31,27 +32,23 @@ pub struct HSetCommand;
 impl HSetCommand {
   /// Parse arguments from RESP items
   /// Format: HSET key field value [field value ...]
-  fn parse_args(items: &[Value]) -> Result<HSetArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<HSetArgs, ProtocolError> {
     // Minimum: HSET key field value (4 items)
     if items.len() < 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'hset' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("hset"));
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     // Parse field-value pairs from items[2..]
     let field_count = items.len() - 2; // items[2] onwards
     if !field_count.is_multiple_of(2) {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'hset' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("hset"));
     }
 
     let mut fields = Vec::with_capacity(field_count / 2);
@@ -60,13 +57,13 @@ impl HSetCommand {
       let field = match &items[i] {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Err(Value::error("ERR invalid field")),
+        _ => return Err(ProtocolError::InvalidArgument("field")),
       };
 
       let value = match &items[i + 1] {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Err(Value::error("ERR invalid value")),
+        _ => return Err(ProtocolError::InvalidArgument("value")),
       };
 
       fields.push((field, value));
@@ -79,16 +76,13 @@ impl HSetCommand {
 
 #[async_trait]
 impl Command for HSetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse arguments
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+    let args = Self::parse_args(items)?;
 
     // Get or create metadata
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match HashMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
@@ -103,7 +97,7 @@ impl Command for HSetCommand {
           HashMetadata::new()
         }
       },
-      _ => {
+      None => {
         // Not found, create new
         HashMetadata::new()
       }
@@ -121,7 +115,7 @@ impl Command for HSetCommand {
       let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, field);
 
       // Check if field exists (for counting added fields)
-      let field_exists = matches!(server.get(&sub_key_str).await, Ok(Some(_)));
+      let field_exists = (server.get(&sub_key_str).await?).is_some();
 
       // Prepare field value entry
       let field_value = HashFieldValue::new(value_data.clone());
@@ -138,12 +132,10 @@ impl Command for HSetCommand {
     entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
     // Perform atomic batch write
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
     // Return the number of newly added fields
-    Value::Integer(added_count)
+    Ok(Value::Integer(added_count))
   }
 }
 

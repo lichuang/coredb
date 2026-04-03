@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -12,22 +13,21 @@ pub struct DecrParams {
 }
 
 impl DecrParams {
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() != 2 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("DECR"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
-    Some(DecrParams { key })
+    Ok(DecrParams { key })
   }
 }
 
-/// Parse bytes as i64, returns None if invalid
 fn parse_i64(data: &[u8]) -> Option<i64> {
   let s = std::str::from_utf8(data).ok()?;
   s.trim().parse::<i64>().ok()
@@ -38,15 +38,11 @@ pub struct DecrCommand;
 
 #[async_trait]
 impl Command for DecrCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match DecrParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'decr' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = DecrParams::parse(items)?;
 
     let now = now_ms();
 
-    // Get current value
     let current_value = match server.get(&params.key).await {
       Ok(Some(raw_value)) => match StringValue::deserialize(&raw_value) {
         Ok(string_value) => {
@@ -57,30 +53,25 @@ impl Command for DecrCommand {
             Some(string_value)
           }
         }
-        Err(_) => {
-          return Value::error("WRONGTYPE Operation against a key holding the wrong kind of value");
-        }
+        Err(_) => return Err(ProtocolError::WrongType.into()),
       },
       Ok(None) => None,
       Err(_) => None,
     };
 
-    // Parse current integer value or use 0 for non-existent
     let current_int: i64 = match current_value {
       Some(ref sv) => match parse_i64(&sv.data) {
         Some(n) => n,
-        None => return Value::error("ERR value is not an integer or out of range"),
+        None => return Err(ProtocolError::NotAnInteger.into()),
       },
       None => 0,
     };
 
-    // Decrement and check overflow
     let new_int = match current_int.checked_sub(1) {
       Some(n) => n,
-      None => return Value::error("ERR increment or decrement would overflow"),
+      None => return Err(ProtocolError::Overflow.into()),
     };
 
-    // Preserve existing TTL if key existed and had one
     let new_string_value = if let Some(ref sv) = current_value {
       if sv.has_expiration() {
         StringValue::with_expiration(new_int.to_string().into_bytes(), sv.expires_at)
@@ -91,12 +82,9 @@ impl Command for DecrCommand {
       StringValue::new(new_int.to_string().into_bytes())
     };
 
-    // Store the new value
     let serialized = new_string_value.serialize();
-    match server.set(params.key, serialized).await {
-      Ok(_) => Value::Integer(new_int),
-      Err(e) => Value::error(format!("ERR {}", e)),
-    }
+    server.set(params.key, serialized).await?;
+    Ok(Value::Integer(new_int))
   }
 }
 
@@ -127,7 +115,7 @@ mod tests {
   #[test]
   fn test_decr_params_parse_no_key() {
     let items = vec![Value::BulkString(Some(b"DECR".to_vec()))];
-    assert!(DecrParams::parse(&items).is_none());
+    assert!(DecrParams::parse(&items).is_err());
   }
 
   #[test]
@@ -137,7 +125,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"extra".to_vec())),
     ];
-    assert!(DecrParams::parse(&items).is_none());
+    assert!(DecrParams::parse(&items).is_err());
   }
 
   #[test]
@@ -163,7 +151,7 @@ mod tests {
     assert_eq!(parse_i64(b"  "), None);
     assert_eq!(parse_i64(b"abc"), None);
     assert_eq!(parse_i64(b"12abc"), None);
-    assert_eq!(parse_i64(b"9223372036854775808"), None); // Overflow
-    assert_eq!(parse_i64(b"-9223372036854775809"), None); // Underflow
+    assert_eq!(parse_i64(b"9223372036854775808"), None);
+    assert_eq!(parse_i64(b"-9223372036854775809"), None);
   }
 }

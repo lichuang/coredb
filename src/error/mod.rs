@@ -3,9 +3,9 @@
 //! This module provides unified error types for the entire CoreDB project,
 //! using `thiserror` for ergonomic error handling.
 
+// Some enum variants are defined for future use by commands not yet implemented.
 #![allow(dead_code)]
 
-use std::io;
 use thiserror::Error;
 
 use crate::protocol::resp::Value;
@@ -32,10 +32,26 @@ pub enum ProtocolError {
   /// Syntax error in command
   #[error("ERR syntax error")]
   SyntaxError,
+
+  /// WRONGTYPE - operation against a key holding the wrong kind of value
+  #[error("WRONGTYPE Operation against a key holding the wrong kind of value")]
+  WrongType,
+
+  /// Value is not a valid integer
+  #[error("ERR value is not an integer or out of range")]
+  NotAnInteger,
+
+  /// Numeric overflow on increment/decrement
+  #[error("ERR increment or decrement would overflow")]
+  Overflow,
+
+  /// Custom error with full Redis error message
+  #[error("{0}")]
+  Custom(&'static str),
 }
 
 /// Storage-related errors (Raft, RocksDB operations)
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum StorageError {
   /// Raft consensus error
   #[error("raft error: {0}")]
@@ -79,7 +95,7 @@ pub enum EncodeError {
 }
 
 /// Configuration errors
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum ConfigError {
   /// Invalid configuration value
   #[error("invalid configuration: {0}")]
@@ -91,24 +107,17 @@ pub enum ConfigError {
 
   /// Failed to parse configuration file
   #[error("failed to parse config file: {0}")]
-  ParseFailed(#[from] toml::de::Error),
+  ParseFailed(String),
 
   /// IO error while reading config
   #[error("io error: {0}")]
-  Io(#[from] io::Error),
+  Io(String),
 }
 
 /// Server/Network errors
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum ServerError {
   /// Failed to bind to address
-  #[error("failed to bind to {addr}: {source}")]
-  BindFailed {
-    addr: String,
-    #[source]
-    source: io::Error,
-  },
-
   /// Connection error
   #[error("connection error: {0}")]
   Connection(String),
@@ -116,10 +125,14 @@ pub enum ServerError {
   /// Server is shutting down
   #[error("server is shutting down")]
   ShuttingDown,
+
+  /// Failed to bind to address
+  #[error("failed to bind to {addr}: {reason}")]
+  BindFailed { addr: String, reason: String },
 }
 
 /// The main CoreDB error type
-#[derive(Error, Debug)]
+#[derive(Error, Clone, Debug, PartialEq)]
 pub enum CoreDbError {
   /// Protocol-level error
   #[error(transparent)]
@@ -145,23 +158,18 @@ pub enum CoreDbError {
 /// Type alias for CoreDB results
 pub type CoreDbResult<T> = Result<T, CoreDbError>;
 
-// Convenience conversions
+// === Conversions to RESP Value ===
 
-impl From<ProtocolError> for Value {
-  fn from(err: ProtocolError) -> Self {
-    Value::error(err.to_string())
-  }
-}
-
-impl From<StorageError> for Value {
-  fn from(err: StorageError) -> Self {
-    Value::error(format!("ERR {}", err))
-  }
-}
-
-impl From<EncodeError> for Value {
-  fn from(err: EncodeError) -> Self {
-    Value::error(format!("ERR {}", err))
+impl From<CoreDbError> for Value {
+  fn from(err: CoreDbError) -> Self {
+    match &err {
+      CoreDbError::Protocol(e) => Value::error(e.to_string()),
+      // Protocol errors already contain the correct Redis error prefix
+      CoreDbError::Storage(e) => Value::error(format!("ERR {}", e)),
+      CoreDbError::Encode(e) => Value::error(format!("ERR {}", e)),
+      CoreDbError::Config(e) => Value::error(format!("ERR {}", e)),
+      CoreDbError::Server(e) => Value::error(format!("ERR {}", e)),
+    }
   }
 }
 
@@ -176,6 +184,30 @@ mod tests {
       err.to_string(),
       "ERR wrong number of arguments for 'GET' command"
     );
+  }
+
+  #[test]
+  fn test_protocol_error_wrong_type() {
+    let err = ProtocolError::WrongType;
+    assert_eq!(
+      err.to_string(),
+      "WRONGTYPE Operation against a key holding the wrong kind of value"
+    );
+  }
+
+  #[test]
+  fn test_protocol_error_not_integer() {
+    let err = ProtocolError::NotAnInteger;
+    assert_eq!(
+      err.to_string(),
+      "ERR value is not an integer or out of range"
+    );
+  }
+
+  #[test]
+  fn test_protocol_error_overflow() {
+    let err = ProtocolError::Overflow;
+    assert_eq!(err.to_string(), "ERR increment or decrement would overflow");
   }
 
   #[test]
@@ -200,9 +232,33 @@ mod tests {
   #[test]
   fn test_error_into_resp_value() {
     let err = ProtocolError::SyntaxError;
-    let value: Value = err.into();
+    let value: Value = CoreDbError::Protocol(err).into();
     match value {
       Value::Error(msg) => assert!(msg.contains("syntax error")),
+      _ => panic!("Expected error value"),
+    }
+  }
+
+  #[test]
+  fn test_core_db_error_into_value() {
+    let err = CoreDbError::Protocol(ProtocolError::WrongType);
+    let value: Value = err.into();
+    match value {
+      Value::Error(msg) => {
+        assert!(msg.starts_with("WRONGTYPE"));
+      }
+      _ => panic!("Expected error value"),
+    }
+  }
+
+  #[test]
+  fn test_storage_error_into_value_via_core() {
+    let err = CoreDbError::Storage(StorageError::ReadFailed("test".to_string()));
+    let value: Value = err.into();
+    match value {
+      Value::Error(msg) => {
+        assert!(msg.starts_with("ERR"));
+      }
       _ => panic!("Expected error value"),
     }
   }

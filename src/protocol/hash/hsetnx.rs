@@ -13,6 +13,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{HashFieldValue, HashMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -33,33 +34,31 @@ struct HSetNxArgs {
 impl HSetNxCommand {
   /// Parse arguments from RESP items
   /// Format: HSETNX key field value (4 items total)
-  fn parse_args(items: &[Value]) -> Result<HSetNxArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<HSetNxArgs, ProtocolError> {
     // HSETNX requires exactly 4 arguments: HSETNX key field value
     if items.len() != 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'hsetnx' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("hsetnx"));
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     // Parse field
     let field = match &items[2] {
       Value::BulkString(Some(data)) => data.clone(),
       Value::SimpleString(s) => s.as_bytes().to_vec(),
-      _ => return Err(Value::error("ERR invalid field")),
+      _ => return Err(ProtocolError::InvalidArgument("field")),
     };
 
     // Parse value
     let value = match &items[3] {
       Value::BulkString(Some(data)) => data.clone(),
       Value::SimpleString(s) => s.as_bytes().to_vec(),
-      _ => return Err(Value::error("ERR invalid value")),
+      _ => return Err(ProtocolError::InvalidArgument("value")),
     };
 
     Ok(HSetNxArgs { key, field, value })
@@ -68,16 +67,13 @@ impl HSetNxCommand {
 
 #[async_trait]
 impl Command for HSetNxCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse arguments
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+    let args = Self::parse_args(items)?;
 
     // Get or create metadata
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match HashMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
@@ -92,7 +88,7 @@ impl Command for HSetNxCommand {
           HashMetadata::new()
         }
       },
-      _ => {
+      None => {
         // Not found, create new
         HashMetadata::new()
       }
@@ -104,11 +100,11 @@ impl Command for HSetNxCommand {
     let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &args.field);
 
     // Check if field exists
-    let field_exists = matches!(server.get(&sub_key_str).await, Ok(Some(_)));
+    let field_exists = (server.get(&sub_key_str).await?).is_some();
 
     // If field exists, return 0 (do not set)
     if field_exists {
-      return Value::Integer(0);
+      return Ok(Value::Integer(0));
     }
 
     // Field does not exist, update metadata size first
@@ -124,12 +120,10 @@ impl Command for HSetNxCommand {
     ];
 
     // Perform atomic batch write
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
     // Return 1 to indicate the field was set
-    Value::Integer(1)
+    Ok(Value::Integer(1))
   }
 }
 

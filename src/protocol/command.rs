@@ -1,3 +1,4 @@
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::bitmap::{GetBitCommand, SetBitCommand};
 use crate::protocol::connection::PingCommand;
 use crate::protocol::hash::{
@@ -18,12 +19,14 @@ use crate::protocol::zset::{ZAddCommand, ZRangeCommand, ZRemCommand};
 use crate::server::Server;
 use async_trait::async_trait;
 use std::collections::HashMap;
+use tracing::warn;
 
 /// Command trait that all Redis commands must implement
 #[async_trait]
 pub trait Command: Send + Sync {
-  /// Execute the command with given RESP items and server context
-  async fn execute(&self, items: &[Value], server: &Server) -> Value;
+  /// Execute the command with given RESP items and server context.
+  /// Returns a Result<Value, CoreDbError> — errors are propagated via ? operator.
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError>;
 }
 
 /// Command factory for creating and executing commands
@@ -110,7 +113,8 @@ impl CommandFactory {
     factory
   }
 
-  /// Execute a RESP command on the given server
+  /// Execute a RESP command on the given server.
+  /// This is the single unified error-to-RESP conversion point.
   pub async fn execute(&self, value: Value, server: &Server) -> Value {
     match value {
       Value::Array(Some(items)) if !items.is_empty() => {
@@ -123,8 +127,14 @@ impl CommandFactory {
 
         // Find and execute command
         match self.commands.get(&cmd_name) {
-          Some(cmd) => cmd.execute(&items, server).await,
-          None => Value::error(format!("unknown command '{}'", cmd_name)),
+          Some(cmd) => match cmd.execute(&items, server).await {
+            Ok(v) => v,
+            Err(e) => {
+              warn!("Command '{}' error: {}", cmd_name, e);
+              e.into() // CoreDbError → Value::Error
+            }
+          },
+          None => Value::error(ProtocolError::UnknownCommand(cmd_name).to_string()),
         }
       }
       _ => Value::error("ERR failed to parse command"),

@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -12,28 +13,31 @@ pub struct IncrbyParams {
 }
 
 impl IncrbyParams {
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() != 3 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("INCRBY"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let increment = match &items[2] {
       Value::BulkString(Some(data)) => {
         let s = String::from_utf8_lossy(data);
-        s.parse::<i64>().ok()?
+        s.parse::<i64>()
+          .map_err(|_| ProtocolError::InvalidArgument("increment"))?
       }
-      Value::SimpleString(s) => s.parse::<i64>().ok()?,
+      Value::SimpleString(s) => s
+        .parse::<i64>()
+        .map_err(|_| ProtocolError::InvalidArgument("increment"))?,
       Value::Integer(i) => *i,
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("increment")),
     };
 
-    Some(IncrbyParams { key, increment })
+    Ok(IncrbyParams { key, increment })
   }
 }
 
@@ -46,11 +50,8 @@ pub struct IncrbyCommand;
 
 #[async_trait]
 impl Command for IncrbyCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match IncrbyParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'incrby' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = IncrbyParams::parse(items)?;
 
     let now = now_ms();
 
@@ -64,9 +65,7 @@ impl Command for IncrbyCommand {
             Some(string_value)
           }
         }
-        Err(_) => {
-          return Value::error("WRONGTYPE Operation against a key holding the wrong kind of value");
-        }
+        Err(_) => return Err(ProtocolError::WrongType.into()),
       },
       Ok(None) => None,
       Err(_) => None,
@@ -75,14 +74,14 @@ impl Command for IncrbyCommand {
     let current_int: i64 = match current_value {
       Some(ref sv) => match parse_i64(&sv.data) {
         Some(n) => n,
-        None => return Value::error("ERR value is not an integer or out of range"),
+        None => return Err(ProtocolError::NotAnInteger.into()),
       },
       None => 0,
     };
 
     let new_int = match current_int.checked_add(params.increment) {
       Some(n) => n,
-      None => return Value::error("ERR increment or decrement would overflow"),
+      None => return Err(ProtocolError::Overflow.into()),
     };
 
     let new_string_value = if let Some(ref sv) = current_value {
@@ -96,10 +95,8 @@ impl Command for IncrbyCommand {
     };
 
     let serialized = new_string_value.serialize();
-    match server.set(params.key, serialized).await {
-      Ok(_) => Value::Integer(new_int),
-      Err(e) => Value::error(format!("ERR {}", e)),
-    }
+    server.set(params.key, serialized).await?;
+    Ok(Value::Integer(new_int))
   }
 }
 
@@ -189,7 +186,7 @@ mod tests {
   #[test]
   fn test_incrby_params_parse_missing_key() {
     let items = vec![Value::BulkString(Some(b"INCRBY".to_vec()))];
-    assert!(IncrbyParams::parse(&items).is_none());
+    assert!(IncrbyParams::parse(&items).is_err());
   }
 
   #[test]
@@ -198,7 +195,7 @@ mod tests {
       Value::BulkString(Some(b"INCRBY".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
     ];
-    assert!(IncrbyParams::parse(&items).is_none());
+    assert!(IncrbyParams::parse(&items).is_err());
   }
 
   #[test]
@@ -208,7 +205,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"not_a_number".to_vec())),
     ];
-    assert!(IncrbyParams::parse(&items).is_none());
+    assert!(IncrbyParams::parse(&items).is_err());
   }
 
   #[test]
@@ -218,7 +215,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"9223372036854775808".to_vec())),
     ];
-    assert!(IncrbyParams::parse(&items).is_none());
+    assert!(IncrbyParams::parse(&items).is_err());
   }
 
   #[test]
@@ -229,7 +226,7 @@ mod tests {
       Value::BulkString(Some(b"5".to_vec())),
       Value::BulkString(Some(b"extra".to_vec())),
     ];
-    assert!(IncrbyParams::parse(&items).is_none());
+    assert!(IncrbyParams::parse(&items).is_err());
   }
 
   #[test]

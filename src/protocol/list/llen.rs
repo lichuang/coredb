@@ -9,6 +9,7 @@
 //! - Error if key exists but is not a list
 
 use crate::encoding::{ListMetadata, TYPE_LIST};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -19,48 +20,46 @@ pub struct LLenCommand;
 
 #[async_trait]
 impl Command for LLenCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse LLEN key (exactly 2 items: command + key)
     if items.len() != 2 {
-      return Value::error("ERR wrong number of arguments for 'llen' command");
+      return Err(ProtocolError::WrongArgCount("llen").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => match ListMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => match ListMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check type
           if meta.get_type() != TYPE_LIST {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           // Check if expired
           if meta.is_expired(now_ms()) {
-            return Value::Integer(0);
+            return Ok(Value::Integer(0));
           }
           meta
         }
         Err(_) => {
           // Corrupted metadata, return 0
-          return Value::Integer(0);
+          return Ok(Value::Integer(0));
         }
       },
-      _ => {
+      None => {
         // Key not found, return 0
-        return Value::Integer(0);
+        return Ok(Value::Integer(0));
       }
     };
 
     // Return the size from metadata
-    Value::Integer(metadata.size as i64)
+    Ok(Value::Integer(metadata.size as i64))
   }
 }
 

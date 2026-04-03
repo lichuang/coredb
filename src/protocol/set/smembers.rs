@@ -9,6 +9,7 @@
 //! - Error if key exists but is not a set
 
 use crate::encoding::{SetMemberValue, SetMetadata, TYPE_SET};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -20,42 +21,40 @@ pub struct SMembersCommand;
 
 #[async_trait]
 impl Command for SMembersCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse SMEMBERS key (exactly 2 items: command + key)
     if items.len() != 2 {
-      return Value::error("ERR wrong number of arguments for 'smembers' command");
+      return Err(ProtocolError::WrongArgCount("smembers").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => match SetMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => match SetMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_SET {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           // Check if expired
           if meta.is_expired(now_ms()) {
-            return Value::Array(Some(vec![]));
+            return Ok(Value::Array(Some(vec![])));
           }
           meta
         }
         Err(_) => {
           // Corrupted metadata, return empty array
-          return Value::Array(Some(vec![]));
+          return Ok(Value::Array(Some(vec![])));
         }
       },
-      _ => {
+      None => {
         // Key not found, return empty array
-        return Value::Array(Some(vec![]));
+        return Ok(Value::Array(Some(vec![])));
       }
     };
 
@@ -65,10 +64,7 @@ impl Command for SMembersCommand {
     let prefix_hex = SetMemberValue::build_prefix_hex(key.as_bytes(), version);
 
     // Scan for all member entries with this prefix
-    let scan_results = match server.scan_prefix(prefix_hex.as_bytes()).await {
-      Ok(results) => results,
-      Err(e) => return Value::error(format!("ERR failed to scan set members: {}", e)),
-    };
+    let scan_results = server.scan_prefix(prefix_hex.as_bytes()).await?;
 
     // Parse results and build response array of member names
     let mut result_array = Vec::with_capacity(scan_results.len());
@@ -90,7 +86,7 @@ impl Command for SMembersCommand {
       }
     }
 
-    Value::Array(Some(result_array))
+    Ok(Value::Array(Some(result_array)))
   }
 }
 
@@ -119,16 +115,14 @@ mod tests {
 
   // Helper for testing arg validation
   impl SMembersCommand {
-    fn parse_args_test(items: &[Value]) -> Result<String, Value> {
+    fn parse_args_test(items: &[Value]) -> Result<String, ProtocolError> {
       if items.len() != 2 {
-        return Err(Value::error(
-          "ERR wrong number of arguments for 'smembers' command",
-        ));
+        return Err(ProtocolError::WrongArgCount("smembers"));
       }
       match &items[1] {
         Value::BulkString(Some(data)) => Ok(String::from_utf8_lossy(data).to_string()),
         Value::SimpleString(s) => Ok(s.clone()),
-        _ => Err(Value::error("ERR invalid key")),
+        _ => Err(ProtocolError::InvalidArgument("key")),
       }
     }
   }

@@ -1,6 +1,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{TYPE_ZSET, ZSetMemberValue, ZSetMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -15,17 +16,15 @@ struct ZRemArgs {
 pub struct ZRemCommand;
 
 impl ZRemCommand {
-  fn parse_args(items: &[Value]) -> Result<ZRemArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<ZRemArgs, ProtocolError> {
     if items.len() < 3 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'zrem' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("zrem"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let mut members = Vec::with_capacity(items.len() - 2);
@@ -33,7 +32,7 @@ impl ZRemCommand {
       let member = match item {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Err(Value::error("ERR invalid member")),
+        _ => return Err(ProtocolError::InvalidArgument("member")),
       };
       members.push(member);
     }
@@ -44,28 +43,23 @@ impl ZRemCommand {
 
 #[async_trait]
 impl Command for ZRemCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ZSetMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ZSetMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_ZSET {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
-            return Value::Integer(0);
+            return Ok(Value::Integer(0));
           }
           meta
         }
-        Err(_) => return Value::Integer(0),
+        Err(_) => return Ok(Value::Integer(0)),
       },
-      _ => return Value::Integer(0),
+      None => return Ok(Value::Integer(0)),
     };
 
     let version = metadata.version;
@@ -83,16 +77,14 @@ impl Command for ZRemCommand {
     }
 
     if removed_count == 0 {
-      return Value::Integer(0);
+      return Ok(Value::Integer(0));
     }
 
     entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
-    Value::Integer(removed_count)
+    Ok(Value::Integer(removed_count))
   }
 }
 

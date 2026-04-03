@@ -3,14 +3,11 @@
 //! HINCRBY key field increment
 //! Increments the integer value of a field in a hash by a number.
 //! Uses 0 as initial value if the field doesn't exist.
-//!
-//! Returns:
-//! - The value of the field after the increment operation
-//! - Error if the value is not an integer or if overflow occurs
 
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{HashFieldValue, HashMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -31,40 +28,35 @@ pub struct HIncrByCommand;
 impl HIncrByCommand {
   /// Parse arguments from RESP items
   /// Format: HINCRBY key field increment
-  fn parse_args(items: &[Value]) -> Result<HIncrByArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<HIncrByArgs, ProtocolError> {
     // HINCRBY key field increment (4 items)
     if items.len() != 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'hincrby' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("hincrby"));
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     // Parse field
     let field = match &items[2] {
       Value::BulkString(Some(data)) => data.clone(),
       Value::SimpleString(s) => s.as_bytes().to_vec(),
-      _ => return Err(Value::error("ERR invalid field")),
+      _ => return Err(ProtocolError::InvalidArgument("field")),
     };
 
     // Parse increment
     let increment = match &items[3] {
       Value::BulkString(Some(data)) => {
         let s = String::from_utf8_lossy(data);
-        s.parse::<i64>()
-          .map_err(|_| Value::error("ERR value is not an integer or out of range"))?
+        s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?
       }
-      Value::SimpleString(s) => s
-        .parse::<i64>()
-        .map_err(|_| Value::error("ERR value is not an integer or out of range"))?,
+      Value::SimpleString(s) => s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)?,
       Value::Integer(i) => *i,
-      _ => return Err(Value::error("ERR value is not an integer or out of range")),
+      _ => return Err(ProtocolError::NotAnInteger),
     };
 
     Ok(HIncrByArgs {
@@ -83,16 +75,13 @@ impl HIncrByCommand {
 
 #[async_trait]
 impl Command for HIncrByCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse arguments
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+    let args = Self::parse_args(items)?;
 
     // Get or create metadata
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match HashMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
@@ -107,7 +96,7 @@ impl Command for HIncrByCommand {
           HashMetadata::new()
         }
       },
-      _ => {
+      None => {
         // Not found, create new
         HashMetadata::new()
       }
@@ -119,40 +108,35 @@ impl Command for HIncrByCommand {
     let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &args.field);
 
     // Get current value
-    let current_value: i64 = match server.get(&sub_key_str).await {
-      Ok(Some(raw_value)) => {
-        match HashFieldValue::deserialize(&raw_value) {
-          Ok(field_value) => {
-            // Parse current value as i64
-            match Self::parse_value_to_i64(&field_value.data) {
-              Ok(v) => v,
-              Err(_) => {
-                return Value::error("ERR hash value is not an integer");
-              }
+    let current_value: i64 = match server.get(&sub_key_str).await? {
+      Some(raw_value) => match HashFieldValue::deserialize(&raw_value) {
+        Ok(field_value) => {
+          // Parse current value as i64
+          match Self::parse_value_to_i64(&field_value.data) {
+            Ok(v) => v,
+            Err(_) => {
+              return Err(ProtocolError::Custom("ERR hash value is not an integer").into());
             }
           }
-          Err(_) => {
-            // Corrupted, treat as 0
-            0
-          }
         }
-      }
-      _ => {
+        Err(_) => {
+          // Corrupted, treat as 0
+          0
+        }
+      },
+      None => {
         // Field doesn't exist, start with 0
         0
       }
     };
 
     // Perform increment with overflow check
-    let new_value = match current_value.checked_add(args.increment) {
-      Some(v) => v,
-      None => {
-        return Value::error("ERR increment or decrement would overflow");
-      }
-    };
+    let new_value = current_value
+      .checked_add(args.increment)
+      .ok_or(ProtocolError::Overflow)?;
 
     // Check if field is new
-    let field_exists = matches!(server.get(&sub_key_str).await, Ok(Some(_)));
+    let field_exists = (server.get(&sub_key_str).await?).is_some();
 
     // Prepare batch write entries
     let mut entries: Vec<UpsertKV> = Vec::new();
@@ -170,12 +154,10 @@ impl Command for HIncrByCommand {
     entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
     // Perform atomic batch write
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
     // Return the new value
-    Value::Integer(new_value)
+    Ok(Value::Integer(new_value))
   }
 }
 

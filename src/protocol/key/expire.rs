@@ -4,18 +4,9 @@
 //!
 //! Set a timeout on key. After the timeout has expired, the key will
 //! automatically be deleted. Works on any data type (string, hash, etc.).
-//!
-//! Options:
-//! - NX: Only set the expiration if the key has no associated expiration
-//! - XX: Only set the expiration if the key already has an expiration
-//! - GT: Only set the expiration if the new expiration is greater than current one
-//! - LT: Only set the expiration if the new expiration is less than current one
-//!
-//! Returns:
-//! - Integer 1: the timeout was set
-//! - Integer 0: the timeout was not set (key does not exist, or condition not met)
 
 use crate::encoding::{HashMetadata, StringValue};
+use crate::error::{CoreDbError, CoreDbResult, EncodeError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -46,26 +37,26 @@ pub struct ExpireParams {
 impl ExpireParams {
   /// Parse EXPIRE command parameters from RESP array items
   /// Format: EXPIRE key seconds [NX | XX | GT | LT]
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     // Need at least: EXPIRE key seconds (3 items)
     if items.len() < 3 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("expire"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::WrongArgCount("expire")),
     };
 
-    let seconds = parse_u64(&items[2])?;
+    let seconds = parse_u64(&items[2]).ok_or(ProtocolError::NotAnInteger)?;
 
     // Parse optional condition flag
     let condition = if items.len() >= 4 {
       let flag = match &items[3] {
         Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_uppercase(),
         Value::SimpleString(s) => s.to_uppercase(),
-        _ => return None,
+        _ => return Err(ProtocolError::WrongArgCount("expire")),
       };
 
       match flag.as_str() {
@@ -73,13 +64,13 @@ impl ExpireParams {
         "XX" => Some(ExpireCondition::Xx),
         "GT" => Some(ExpireCondition::Gt),
         "LT" => Some(ExpireCondition::Lt),
-        _ => return None, // Unknown option
+        _ => return Err(ProtocolError::SyntaxError),
       }
     } else {
       None
     };
 
-    Some(ExpireParams {
+    Ok(ExpireParams {
       key,
       seconds,
       condition,
@@ -110,7 +101,7 @@ pub enum KeyState {
 }
 
 /// Read key state from the store, handling expiration detection
-pub async fn read_key_state(server: &Server, key: &str) -> Result<KeyState, String> {
+pub async fn read_key_state(server: &Server, key: &str) -> CoreDbResult<KeyState> {
   let raw_value = match server.get(key).await? {
     Some(v) => v,
     None => return Ok(KeyState::NotFound),
@@ -148,21 +139,15 @@ pub struct ExpireCommand;
 
 #[async_trait]
 impl Command for ExpireCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match ExpireParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'expire' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = ExpireParams::parse(items)?;
 
     // Read current key state
-    let key_state = match read_key_state(server, &params.key).await {
-      Ok(state) => state,
-      Err(e) => return Value::error(format!("ERR failed to read key '{}': {}", params.key, e)),
-    };
+    let key_state = read_key_state(server, &params.key).await?;
 
     // Key must exist (not expired or missing)
     let (current_expires_at, flags) = match key_state {
-      KeyState::NotFound | KeyState::Expired => return Value::Integer(0),
+      KeyState::NotFound | KeyState::Expired => return Ok(Value::Integer(0)),
       KeyState::String(sv) => (sv.expires_at, sv.flags),
       KeyState::Hash(hm) => (hm.expires_at, hm.flags),
     };
@@ -193,42 +178,33 @@ impl Command for ExpireCommand {
     };
 
     if !should_set {
-      return Value::Integer(0);
+      return Ok(Value::Integer(0));
     }
 
     // Re-read and reconstruct the value with updated expiration
-    let raw_value = match server.get(&params.key).await {
-      Ok(Some(v)) => v,
-      Ok(None) => return Value::Integer(0), // Key disappeared between reads
-      Err(e) => return Value::error(format!("ERR failed to read key '{}': {}", params.key, e)),
+    let raw_value = match server.get(&params.key).await? {
+      Some(v) => v,
+      None => return Ok(Value::Integer(0)), // Key disappeared between reads
     };
 
     let data_type = flags & 0x0F;
     let new_value = if data_type == crate::encoding::TYPE_STRING {
-      match StringValue::deserialize(&raw_value) {
-        Ok(mut sv) => {
-          sv.expires_at = new_expires_at;
-          sv.serialize()
-        }
-        Err(_) => return Value::error(format!("ERR failed to deserialize key '{}'", params.key)),
-      }
+      let mut sv = StringValue::deserialize(&raw_value)
+        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
+      sv.expires_at = new_expires_at;
+      sv.serialize()
     } else if data_type == crate::encoding::TYPE_HASH {
-      match HashMetadata::deserialize(&raw_value) {
-        Ok(mut hm) => {
-          hm.expires_at = new_expires_at;
-          hm.serialize()
-        }
-        Err(_) => return Value::error(format!("ERR failed to deserialize key '{}'", params.key)),
-      }
+      let mut hm = HashMetadata::deserialize(&raw_value)
+        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
+      hm.expires_at = new_expires_at;
+      hm.serialize()
     } else {
-      return Value::error(format!("ERR unsupported key type for '{}'", params.key));
+      return Err(ProtocolError::Custom("ERR unsupported key type").into());
     };
 
     // Write the updated value back
-    match server.set(params.key, new_value).await {
-      Ok(_) => Value::Integer(1),
-      Err(e) => Value::error(format!("ERR failed to set key: {}", e)),
-    }
+    server.set(params.key, new_value).await?;
+    Ok(Value::Integer(1))
   }
 }
 
@@ -299,20 +275,17 @@ mod tests {
 
   #[test]
   fn test_expire_params_parse_insufficient_args() {
-    // Only EXPIRE key (missing seconds)
     let items = vec![
       Value::BulkString(Some(b"EXPIRE".to_vec())),
       Value::BulkString(Some(b"mykey".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
 
-    // Only EXPIRE
     let items = vec![Value::BulkString(Some(b"EXPIRE".to_vec()))];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
 
-    // Empty
     let items: Vec<Value> = vec![];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -322,7 +295,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"not_a_number".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -332,7 +305,7 @@ mod tests {
       Value::Integer(123),
       Value::BulkString(Some(b"60".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -343,7 +316,7 @@ mod tests {
       Value::BulkString(Some(b"60".to_vec())),
       Value::BulkString(Some(b"UNKNOWN".to_vec())),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
   }
 
   #[test]
@@ -378,7 +351,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::Integer(-1),
     ];
-    assert!(ExpireParams::parse(&items).is_none());
+    assert!(ExpireParams::parse(&items).is_err());
   }
 
   #[test]

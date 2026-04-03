@@ -1,4 +1,5 @@
 use crate::encoding::{ListElementValue, ListMetadata, TYPE_LIST};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -14,69 +15,59 @@ struct RangeArgs {
 }
 
 impl LRangeCommand {
-  fn parse_args(items: &[Value]) -> Result<RangeArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<RangeArgs, ProtocolError> {
     if items.len() != 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'lrange' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("lrange"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
-    let start = parse_i64(&items[2], "start")?;
-    let stop = parse_i64(&items[3], "stop")?;
+    let start = parse_i64(&items[2])?;
+    let stop = parse_i64(&items[3])?;
 
     Ok(RangeArgs { key, start, stop })
   }
 }
 
-fn parse_i64(value: &Value, name: &str) -> Result<i64, Value> {
+fn parse_i64(value: &Value) -> Result<i64, ProtocolError> {
   match value {
     Value::BulkString(Some(data)) => {
       let s = String::from_utf8_lossy(data);
-      s.parse::<i64>()
-        .map_err(|_| Value::error("ERR value is not an integer or out of range"))
+      s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger)
     }
-    Value::SimpleString(s) => s
-      .parse::<i64>()
-      .map_err(|_| Value::error("ERR value is not an integer or out of range")),
+    Value::SimpleString(s) => s.parse::<i64>().map_err(|_| ProtocolError::NotAnInteger),
     Value::Integer(n) => Ok(*n),
-    _ => Err(Value::error(format!("ERR invalid {}", name))),
+    _ => Err(ProtocolError::NotAnInteger),
   }
 }
 
 #[async_trait]
 impl Command for LRangeCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
-    let metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ListMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ListMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_LIST {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
-            return Value::Array(Some(vec![]));
+            return Ok(Value::Array(Some(vec![])));
           }
           meta
         }
-        Err(_) => return Value::Array(Some(vec![])),
+        Err(_) => return Ok(Value::Array(Some(vec![]))),
       },
-      _ => return Value::Array(Some(vec![])),
+      None => return Ok(Value::Array(Some(vec![]))),
     };
 
     if metadata.size == 0 {
-      return Value::Array(Some(vec![]));
+      return Ok(Value::Array(Some(vec![])));
     }
 
     let size = metadata.size as i64;
@@ -85,7 +76,7 @@ impl Command for LRangeCommand {
     let stop = normalize_index(args.stop, size);
 
     if start > stop || start >= size {
-      return Value::Array(Some(vec![]));
+      return Ok(Value::Array(Some(vec![])));
     }
 
     let end = stop.min(size - 1);
@@ -98,16 +89,16 @@ impl Command for LRangeCommand {
       let physical = metadata.index_at(i as u64).unwrap();
       let sub_key = ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, physical);
 
-      match server.get(&sub_key).await {
-        Ok(Some(raw_elem)) => match ListElementValue::deserialize(&raw_elem) {
+      match server.get(&sub_key).await? {
+        Some(raw_elem) => match ListElementValue::deserialize(&raw_elem) {
           Ok(elem) => results.push(Value::BulkString(Some(elem.data))),
           Err(_) => break,
         },
-        _ => break,
+        None => break,
       }
     }
 
-    Value::Array(Some(results))
+    Ok(Value::Array(Some(results)))
   }
 }
 

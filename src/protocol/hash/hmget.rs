@@ -10,6 +10,7 @@
 //! - Non-existent fields or key return nil for those positions
 
 use crate::encoding::{HashFieldValue, HashMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -21,18 +22,18 @@ pub struct HMGetCommand;
 
 #[async_trait]
 impl Command for HMGetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse HMGET key field1 [field2 ...]
     // Need at least: command + key + 1 field
     if items.len() < 3 {
-      return Value::error("ERR wrong number of arguments for 'hmget' command");
+      return Err(ProtocolError::WrongArgCount("hmget").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Parse fields
@@ -41,32 +42,41 @@ impl Command for HMGetCommand {
       let field = match item {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Value::error("ERR invalid field"),
+        _ => return Err(ProtocolError::InvalidArgument("field").into()),
       };
       fields.push(field);
     }
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => {
         match HashMetadata::deserialize(&raw_meta) {
           Ok(meta) => {
             // Check if expired
             if meta.is_expired(now_ms()) {
               // Return array of nils if expired
-              return Value::Array(Some(vec![Value::BulkString(None); fields.len()]));
+              return Ok(Value::Array(Some(vec![
+                Value::BulkString(None);
+                fields.len()
+              ])));
             }
             meta
           }
           Err(_) => {
             // Return array of nils if corrupted
-            return Value::Array(Some(vec![Value::BulkString(None); fields.len()]));
+            return Ok(Value::Array(Some(vec![
+              Value::BulkString(None);
+              fields.len()
+            ])));
           }
         }
       }
-      _ => {
+      None => {
         // Return array of nils if not found
-        return Value::Array(Some(vec![Value::BulkString(None); fields.len()]));
+        return Ok(Value::Array(Some(vec![
+          Value::BulkString(None);
+          fields.len()
+        ])));
       }
     };
 
@@ -77,20 +87,18 @@ impl Command for HMGetCommand {
     for field in fields {
       let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, &field);
 
-      let value = match server.get(&sub_key_str).await {
-        Ok(Some(raw_value)) => {
-          match HashFieldValue::deserialize(&raw_value) {
-            Ok(field_value) => Value::BulkString(Some(field_value.data)),
-            Err(_) => Value::BulkString(None), // Return nil if corrupted
-          }
-        }
-        _ => Value::BulkString(None), // Return nil if not found
+      let value = match server.get(&sub_key_str).await? {
+        Some(raw_value) => match HashFieldValue::deserialize(&raw_value) {
+          Ok(field_value) => Value::BulkString(Some(field_value.data)),
+          Err(_) => Value::BulkString(None), // Return nil if corrupted
+        },
+        None => Value::BulkString(None), // Return nil if not found
       };
 
       result_array.push(value);
     }
 
-    Value::Array(Some(result_array))
+    Ok(Value::Array(Some(result_array)))
   }
 }
 

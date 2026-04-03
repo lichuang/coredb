@@ -1,6 +1,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{ListElementValue, ListMetadata, TYPE_LIST};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -15,17 +16,15 @@ struct PopArgs {
 }
 
 impl LPopCommand {
-  fn parse_args(items: &[Value]) -> Result<PopArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<PopArgs, ProtocolError> {
     if items.len() < 2 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'lpop' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("lpop"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let count = if items.len() >= 3 {
@@ -34,21 +33,21 @@ impl LPopCommand {
           let s = String::from_utf8_lossy(data);
           match s.parse::<u64>() {
             Ok(n) => Some(n),
-            Err(_) => return Err(Value::error("ERR value is not an integer or out of range")),
+            Err(_) => return Err(ProtocolError::NotAnInteger),
           }
         }
         Value::SimpleString(s) => match s.parse::<u64>() {
           Ok(n) => Some(n),
-          Err(_) => return Err(Value::error("ERR value is not an integer or out of range")),
+          Err(_) => return Err(ProtocolError::NotAnInteger),
         },
         Value::Integer(n) => {
           if *n < 0 {
-            return Err(Value::error("ERR value is not an integer or out of range"));
+            return Err(ProtocolError::NotAnInteger);
           }
           Some(*n as u64)
         }
         _ => {
-          return Err(Value::error("ERR value is not an integer or out of range"));
+          return Err(ProtocolError::NotAnInteger);
         }
       }
     } else {
@@ -61,32 +60,27 @@ impl LPopCommand {
 
 #[async_trait]
 impl Command for LPopCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
-    let metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ListMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ListMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_LIST {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
-            return Value::BulkString(None);
+            return Ok(Value::BulkString(None));
           }
           meta
         }
-        Err(_) => return Value::BulkString(None),
+        Err(_) => return Ok(Value::BulkString(None)),
       },
-      _ => return Value::BulkString(None),
+      None => return Ok(Value::BulkString(None)),
     };
 
     if metadata.size == 0 {
-      return Value::BulkString(None);
+      return Ok(Value::BulkString(None));
     }
 
     let pop_count = args.count.unwrap_or(1).min(metadata.size);
@@ -97,15 +91,15 @@ impl Command for LPopCommand {
 
     for _ in 0..pop_count {
       let sub_key_str = ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, head);
-      match server.get(&sub_key_str).await {
-        Ok(Some(raw_elem)) => match ListElementValue::deserialize(&raw_elem) {
+      match server.get(&sub_key_str).await? {
+        Some(raw_elem) => match ListElementValue::deserialize(&raw_elem) {
           Ok(elem) => {
             results.push(Value::BulkString(Some(elem.data)));
             entries.push(UpsertKV::delete(sub_key_str));
           }
           Err(_) => break,
         },
-        _ => break,
+        None => break,
       }
       head += 1;
     }
@@ -122,17 +116,15 @@ impl Command for LPopCommand {
       entries.push(UpsertKV::insert(args.key.clone(), &new_meta.serialize()));
     }
 
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
-    match args.count {
+    Ok(match args.count {
       None => results
         .into_iter()
         .next()
         .unwrap_or(Value::BulkString(None)),
       Some(_) => Value::Array(Some(results)),
-    }
+    })
   }
 }
 

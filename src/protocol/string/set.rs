@@ -1,4 +1,5 @@
 use crate::encoding::{NO_EXPIRATION, StringValue};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -61,22 +62,22 @@ impl SetParams {
 
   /// Parse SET command parameters from RESP array items
   /// Format: SET key value [NX | XX] [GET] [EX seconds | PX milliseconds | EXAT timestamp | PXAT milliseconds-timestamp | KEEPTTL]
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     // Minimum: SET key value
     if items.len() < 3 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("set"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let value = match &items[2] {
       Value::BulkString(Some(data)) => data.clone(),
       Value::SimpleString(s) => s.as_bytes().to_vec(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("value")),
     };
 
     let mut params = SetParams::new(key, value);
@@ -87,20 +88,20 @@ impl SetParams {
       let arg = match &items[i] {
         Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_uppercase(),
         Value::SimpleString(s) => s.to_uppercase(),
-        _ => return None,
+        _ => return Err(ProtocolError::SyntaxError),
       };
 
       match arg.as_str() {
         "NX" => {
           if params.mode.is_some() {
-            return None; // NX and XX are mutually exclusive
+            return Err(ProtocolError::SyntaxError);
           }
           params.mode = Some(SetMode::Nx);
           i += 1;
         }
         "XX" => {
           if params.mode.is_some() {
-            return None; // NX and XX are mutually exclusive
+            return Err(ProtocolError::SyntaxError);
           }
           params.mode = Some(SetMode::Xx);
           i += 1;
@@ -111,7 +112,7 @@ impl SetParams {
         }
         "EX" => {
           if params.expiration.is_some() || i + 1 >= items.len() {
-            return None;
+            return Err(ProtocolError::SyntaxError);
           }
           let seconds = parse_u64(&items[i + 1])?;
           params.expiration = Some(Expiration::Ex(seconds));
@@ -119,7 +120,7 @@ impl SetParams {
         }
         "PX" => {
           if params.expiration.is_some() || i + 1 >= items.len() {
-            return None;
+            return Err(ProtocolError::SyntaxError);
           }
           let milliseconds = parse_u64(&items[i + 1])?;
           params.expiration = Some(Expiration::Px(milliseconds));
@@ -127,7 +128,7 @@ impl SetParams {
         }
         "EXAT" => {
           if params.expiration.is_some() || i + 1 >= items.len() {
-            return None;
+            return Err(ProtocolError::SyntaxError);
           }
           let timestamp = parse_u64(&items[i + 1])?;
           params.expiration = Some(Expiration::ExAt(timestamp));
@@ -135,7 +136,7 @@ impl SetParams {
         }
         "PXAT" => {
           if params.expiration.is_some() || i + 1 >= items.len() {
-            return None;
+            return Err(ProtocolError::SyntaxError);
           }
           let timestamp = parse_u64(&items[i + 1])?;
           params.expiration = Some(Expiration::PxAt(timestamp));
@@ -143,26 +144,28 @@ impl SetParams {
         }
         "KEEPTTL" => {
           if params.expiration.is_some() {
-            return None;
+            return Err(ProtocolError::SyntaxError);
           }
           params.expiration = Some(Expiration::KeepTTL);
           i += 1;
         }
-        _ => return None, // Unknown option
+        _ => return Err(ProtocolError::SyntaxError),
       }
     }
 
-    Some(params)
+    Ok(params)
   }
 }
 
 /// Parse a Value as u64
-fn parse_u64(value: &Value) -> Option<u64> {
+fn parse_u64(value: &Value) -> Result<u64, ProtocolError> {
   match value {
-    Value::BulkString(Some(data)) => String::from_utf8_lossy(data).parse::<u64>().ok(),
-    Value::SimpleString(s) => s.parse::<u64>().ok(),
-    Value::Integer(i) if *i >= 0 => Some(*i as u64),
-    _ => None,
+    Value::BulkString(Some(data)) => String::from_utf8_lossy(data)
+      .parse::<u64>()
+      .map_err(|_| ProtocolError::NotAnInteger),
+    Value::SimpleString(s) => s.parse::<u64>().map_err(|_| ProtocolError::NotAnInteger),
+    Value::Integer(i) if *i >= 0 => Ok(*i as u64),
+    _ => Err(ProtocolError::NotAnInteger),
   }
 }
 
@@ -171,11 +174,8 @@ pub struct SetCommand;
 
 #[async_trait]
 impl Command for SetCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match SetParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'set' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = SetParams::parse(items)?;
 
     // Get current timestamp once for all expiration calculations
     let now = now_ms();
@@ -184,8 +184,8 @@ impl Command for SetCommand {
     let expires_at = match params.expiration {
       Some(Expiration::KeepTTL) => {
         // Read existing value to get its expiration time
-        match server.get(&params.key).await {
-          Ok(Some(raw_value)) => {
+        match server.get(&params.key).await? {
+          Some(raw_value) => {
             match StringValue::deserialize(&raw_value) {
               Ok(existing) if existing.is_expired(now) => NO_EXPIRATION, // Expired, no TTL to keep
               Ok(existing) if existing.has_expiration() => existing.expires_at, // Keep existing TTL
@@ -193,7 +193,7 @@ impl Command for SetCommand {
               Err(_) => NO_EXPIRATION, // Corrupted, no TTL to keep
             }
           }
-          _ => NO_EXPIRATION, // Key not found or error, no TTL to keep
+          None => NO_EXPIRATION, // Key not found, no TTL to keep
         }
       }
       Some(exp) => match exp {
@@ -223,15 +223,15 @@ impl Command for SetCommand {
       OtherType,                // Key exists but is not a string (Hash, etc.)
     }
 
-    let existing_key = match server.get(&params.key).await {
-      Ok(Some(raw_value)) => {
+    let existing_key = match server.get(&params.key).await? {
+      Some(raw_value) => {
         match StringValue::deserialize(&raw_value) {
           Ok(value) if !value.is_expired(now) => ExistingKey::ValidString(value),
           Ok(_) => ExistingKey::Expired, // Expired, treat as not exists
           Err(_) => ExistingKey::OtherType, // Not a StringValue (might be Hash or other type)
         }
       }
-      _ => ExistingKey::None, // Not found or error
+      None => ExistingKey::None,
     };
 
     // Check if key exists (for NX/XX logic)
@@ -246,7 +246,7 @@ impl Command for SetCommand {
         // NX: Only set if key does not exist
         if key_exists {
           // Key exists, do not set
-          return if params.get {
+          return Ok(if params.get {
             // GET with NX: return current value if it's a string, otherwise nil
             match existing_key {
               ExistingKey::ValidString(v) => Value::BulkString(Some(v.data)),
@@ -255,19 +255,19 @@ impl Command for SetCommand {
           } else {
             // Just return nil (nil bulk string)
             Value::BulkString(None)
-          };
+          });
         }
       }
       Some(SetMode::Xx) => {
         // XX: Only set if key exists
         if !key_exists {
           // Key does not exist, do not set
-          return if params.get {
+          return Ok(if params.get {
             // GET with XX: return nil since key doesn't exist
             Value::BulkString(None)
           } else {
             Value::BulkString(None)
-          };
+          });
         }
       }
       None => {
@@ -282,17 +282,14 @@ impl Command for SetCommand {
     };
 
     // Set the new value
-    match server.set(params.key, serialized).await {
-      Ok(_) => {
-        if params.get {
-          // Return the previous value (or nil if key didn't exist)
-          Value::BulkString(old_value_data)
-        } else {
-          Value::ok()
-        }
-      }
-      Err(e) => Value::error(format!("ERR {}", e)),
-    }
+    server.set(params.key, serialized).await?;
+
+    Ok(if params.get {
+      // Return the previous value (or nil if key didn't exist)
+      Value::BulkString(old_value_data)
+    } else {
+      Value::ok()
+    })
   }
 }
 
@@ -441,7 +438,7 @@ mod tests {
       Value::BulkString(Some(b"NX".to_vec())),
       Value::BulkString(Some(b"XX".to_vec())),
     ];
-    assert!(SetParams::parse(&items).is_none());
+    assert!(SetParams::parse(&items).is_err());
   }
 
   #[test]
@@ -452,7 +449,7 @@ mod tests {
       Value::BulkString(Some(b"myvalue".to_vec())),
       Value::BulkString(Some(b"EX".to_vec())),
     ];
-    assert!(SetParams::parse(&items).is_none());
+    assert!(SetParams::parse(&items).is_err());
   }
 
   #[test]
@@ -461,7 +458,7 @@ mod tests {
       Value::BulkString(Some(b"SET".to_vec())),
       Value::BulkString(Some(b"key".to_vec())),
     ];
-    assert!(SetParams::parse(&items).is_none());
+    assert!(SetParams::parse(&items).is_err());
   }
 
   #[test]
@@ -509,7 +506,7 @@ mod tests {
       Value::BulkString(Some(b"PX".to_vec())),
       Value::BulkString(Some(b"1000".to_vec())),
     ];
-    assert!(SetParams::parse(&items).is_none());
+    assert!(SetParams::parse(&items).is_err());
 
     // Cannot combine EX with KEEPTTL
     let items = vec![
@@ -520,6 +517,6 @@ mod tests {
       Value::BulkString(Some(b"EX".to_vec())),
       Value::BulkString(Some(b"60".to_vec())),
     ];
-    assert!(SetParams::parse(&items).is_none());
+    assert!(SetParams::parse(&items).is_err());
   }
 }

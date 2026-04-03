@@ -1,5 +1,3 @@
-use std::error::Error;
-use std::io::Result as IoResult;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -12,6 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::error::{CoreDbError, ServerError, StorageError};
 use crate::protocol::{CommandFactory, Parser, Value};
 
 /// TCP server with Raft support
@@ -32,17 +31,26 @@ impl Server {
   /// 1. Creates and starts the Raft node
   /// 2. Binds the TCP server
   /// 3. Returns the initialized Server instance
-  pub async fn start(config: Config) -> Result<Arc<Self>, Box<dyn Error>> {
+  pub async fn start(config: Config) -> Result<Arc<Self>, CoreDbError> {
     // Create and start Raft node
     info!("Creating Raft node...");
     let raft_node = RaftNodeBuilder::build(&config.raft)
       .await
-      .map_err(|e| format!("Failed to create Raft node: {}", e))?;
+      .map_err(|e| StorageError::Raft(format!("Failed to create Raft node: {}", e)))?;
     info!("Raft node created and started successfully");
 
     // Bind TCP server
-    let listener = TcpListener::bind(&config.server_addr).await?;
-    let local_addr = listener.local_addr()?;
+    let listener =
+      TcpListener::bind(&config.server_addr)
+        .await
+        .map_err(|e| ServerError::BindFailed {
+          addr: config.server_addr.to_string(),
+          reason: e.to_string(),
+        })?;
+    let local_addr = listener.local_addr().map_err(|e| ServerError::BindFailed {
+      addr: config.server_addr.to_string(),
+      reason: e.to_string(),
+    })?;
     info!("TCP server bound to {}", local_addr);
 
     // Initialize command factory
@@ -65,65 +73,69 @@ impl Server {
   }
 
   /// Get a value from the store (local read)
-  pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, String> {
-    // Use RaftNode's read for consistent read
+  pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
     let req = GetKVReq {
       key: key.to_string(),
     };
-    match self.raft_node.read(req).await {
-      Ok(value) => Ok(value),
-      Err(e) => Err(format!("Failed to read: {}", e)),
-    }
+    self
+      .raft_node
+      .read(req)
+      .await
+      .map_err(|e| StorageError::ReadFailed(e.to_string()))
   }
 
   /// Set a value in the store (through Raft consensus)
-  pub async fn set(&self, key: String, value: Vec<u8>) -> Result<(), String> {
-    // Create UpsertKV command
+  pub async fn set(&self, key: String, value: Vec<u8>) -> Result<(), StorageError> {
     let upsert_kv = Cmd::UpsertKV(UpsertKV::insert(&key, &value));
     let entry = LogEntry::new(upsert_kv);
 
-    // Write through Raft (will be forwarded to leader if needed)
-    match self.raft_node.write(entry).await {
-      Ok(_) => Ok(()),
-      Err(e) => Err(format!("Failed to write: {}", e)),
-    }
+    self
+      .raft_node
+      .write(entry)
+      .await
+      .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
+
+    Ok(())
   }
 
   /// Delete a key from the store (through Raft consensus)
-  pub async fn delete(&self, key: &str) -> Result<bool, String> {
-    // Create Delete command
+  pub async fn delete(&self, key: &str) -> Result<bool, StorageError> {
     let upsert_kv = Cmd::UpsertKV(UpsertKV::delete(key));
     let entry = LogEntry::new(upsert_kv);
 
-    // Write through Raft (will be forwarded to leader if needed)
-    match self.raft_node.write(entry).await {
-      Ok(_) => Ok(true),
-      Err(e) => Err(format!("Failed to delete: {}", e)),
-    }
+    self
+      .raft_node
+      .write(entry)
+      .await
+      .map_err(|e| StorageError::DeleteFailed(e.to_string()))?;
+
+    Ok(true)
   }
 
   /// Batch write multiple entries atomically (through Raft consensus)
   ///
   /// This ensures all entries are written as a single atomic operation.
   /// Either all entries are applied, or none are.
-  pub async fn batch_write(&self, entries: Vec<UpsertKV>) -> Result<AppliedState, String> {
+  pub async fn batch_write(&self, entries: Vec<UpsertKV>) -> Result<AppliedState, StorageError> {
     let req = BatchWriteReq { entries };
-    match self.raft_node.batch_write(req).await {
-      Ok(reply) => Ok(reply),
-      Err(e) => Err(format!("Failed to batch write: {}", e)),
-    }
+    self
+      .raft_node
+      .batch_write(req)
+      .await
+      .map_err(|e| StorageError::WriteFailed(e.to_string()))
   }
 
   /// Scan keys by prefix from the state machine (forwarded to leader)
   /// Returns a vector of (key, value) tuples where keys start with the given prefix
-  pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+  pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError> {
     let req = ScanPrefixReq {
       prefix: prefix.to_vec(),
     };
-    match self.raft_node.scan_prefix(req).await {
-      Ok(results) => Ok(results),
-      Err(e) => Err(format!("Failed to scan prefix: {}", e)),
-    }
+    self
+      .raft_node
+      .scan_prefix(req)
+      .await
+      .map_err(|e| StorageError::ReadFailed(e.to_string()))
   }
 
   /// Process a RESP command and return the response
@@ -136,7 +148,7 @@ impl Server {
     self: Arc<Self>,
     mut stream: TcpStream,
     peer_addr: SocketAddr,
-  ) -> IoResult<()> {
+  ) -> std::io::Result<()> {
     let mut buffer = vec![0u8; 8192]; // 8KB buffer
     let mut pending = Vec::new(); // Buffer for incomplete commands
 
@@ -214,9 +226,13 @@ impl Server {
   }
 
   /// Shutdown the server and Raft node
-  pub async fn shutdown(&self) -> Result<(), Box<dyn Error>> {
+  pub async fn shutdown(&self) -> Result<(), CoreDbError> {
     info!("Shutting down Raft node...");
-    self.raft_node.shutdown().await?;
+    self
+      .raft_node
+      .shutdown()
+      .await
+      .map_err(|e| ServerError::Connection(format!("Shutdown failed: {}", e)))?;
     info!("Raft node shutdown successfully");
     Ok(())
   }

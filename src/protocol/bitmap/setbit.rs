@@ -1,6 +1,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{BitmapFragment, BitmapMetadata, TYPE_BITMAP};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -16,17 +17,15 @@ struct SetBitArgs {
 pub struct SetBitCommand;
 
 impl SetBitCommand {
-  fn parse_args(items: &[Value]) -> Result<SetBitArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<SetBitArgs, ProtocolError> {
     if items.len() != 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'setbit' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("setbit"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let offset = match &items[2] {
@@ -35,7 +34,7 @@ impl SetBitCommand {
         match s.parse::<u64>() {
           Ok(v) => v,
           Err(_) => {
-            return Err(Value::error(
+            return Err(ProtocolError::Custom(
               "ERR bit offset is not an integer or out of range",
             ));
           }
@@ -44,21 +43,21 @@ impl SetBitCommand {
       Value::SimpleString(s) => match s.parse::<u64>() {
         Ok(v) => v,
         Err(_) => {
-          return Err(Value::error(
+          return Err(ProtocolError::Custom(
             "ERR bit offset is not an integer or out of range",
           ));
         }
       },
       Value::Integer(i) => {
         if *i < 0 {
-          return Err(Value::error(
+          return Err(ProtocolError::Custom(
             "ERR bit offset is not an integer or out of range",
           ));
         }
         *i as u64
       }
       _ => {
-        return Err(Value::error(
+        return Err(ProtocolError::Custom(
           "ERR bit offset is not an integer or out of range",
         ));
       }
@@ -70,20 +69,36 @@ impl SetBitCommand {
         match s.trim() {
           "0" => 0u8,
           "1" => 1u8,
-          _ => return Err(Value::error("ERR bit is not an integer or out of range")),
+          _ => {
+            return Err(ProtocolError::Custom(
+              "ERR bit is not an integer or out of range",
+            ));
+          }
         }
       }
       Value::SimpleString(s) => match s.trim() {
         "0" => 0u8,
         "1" => 1u8,
-        _ => return Err(Value::error("ERR bit is not an integer or out of range")),
+        _ => {
+          return Err(ProtocolError::Custom(
+            "ERR bit is not an integer or out of range",
+          ));
+        }
       },
       Value::Integer(i) => match *i {
         0 => 0u8,
         1 => 1u8,
-        _ => return Err(Value::error("ERR bit is not an integer or out of range")),
+        _ => {
+          return Err(ProtocolError::Custom(
+            "ERR bit is not an integer or out of range",
+          ));
+        }
       },
-      _ => return Err(Value::error("ERR bit is not an integer or out of range")),
+      _ => {
+        return Err(ProtocolError::Custom(
+          "ERR bit is not an integer or out of range",
+        ));
+      }
     };
 
     Ok(SetBitArgs {
@@ -96,19 +111,14 @@ impl SetBitCommand {
 
 #[async_trait]
 impl Command for SetBitCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match BitmapMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match BitmapMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_BITMAP {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
             BitmapMetadata::new()
@@ -118,7 +128,7 @@ impl Command for SetBitCommand {
         }
         Err(_) => BitmapMetadata::new(),
       },
-      _ => BitmapMetadata::new(),
+      None => BitmapMetadata::new(),
     };
 
     let version = metadata.version;
@@ -127,9 +137,9 @@ impl Command for SetBitCommand {
 
     let sub_key_str = BitmapFragment::build_sub_key_hex(args.key.as_bytes(), version, frag_idx);
 
-    let mut fragment = match server.get(&sub_key_str).await {
-      Ok(Some(raw_frag)) => raw_frag,
-      _ => BitmapFragment::empty_fragment(),
+    let mut fragment = match server.get(&sub_key_str).await? {
+      Some(raw_frag) => raw_frag,
+      None => BitmapFragment::empty_fragment(),
     };
 
     let old_bit = BitmapFragment::get_bit(&fragment, offset_in_frag);
@@ -144,11 +154,9 @@ impl Command for SetBitCommand {
       UpsertKV::insert(args.key.clone(), &metadata.serialize()),
     ];
 
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
-    Value::Integer(old_bit as i64)
+    Ok(Value::Integer(old_bit as i64))
   }
 }
 

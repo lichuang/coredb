@@ -1,6 +1,7 @@
 use rockraft::raft::types::UpsertKV;
 
 use crate::encoding::{TYPE_ZSET, ZSetMemberValue, ZSetMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -21,18 +22,16 @@ struct ZAddArgs {
 pub struct ZAddCommand;
 
 impl ZAddCommand {
-  fn parse_args(items: &[Value]) -> Result<ZAddArgs, Value> {
+  fn parse_args(items: &[Value]) -> Result<ZAddArgs, ProtocolError> {
     // Minimum: ZADD key score member (4 items)
     if items.len() < 4 {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'zadd' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("zadd"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Err(Value::error("ERR invalid key")),
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
     let mut nx = false;
@@ -76,13 +75,13 @@ impl ZAddCommand {
     }
 
     if nx && xx {
-      return Err(Value::error(
+      return Err(ProtocolError::Custom(
         "ERR XX and NX options at the same time are not compatible",
       ));
     }
 
     if gt && lt {
-      return Err(Value::error(
+      return Err(ProtocolError::Custom(
         "ERR GT and LT options at the same time are not compatible",
       ));
     }
@@ -90,9 +89,7 @@ impl ZAddCommand {
     // Remaining items must be score-member pairs
     let remaining = &items[i..];
     if remaining.is_empty() || !remaining.len().is_multiple_of(2) {
-      return Err(Value::error(
-        "ERR wrong number of arguments for 'zadd' command",
-      ));
+      return Err(ProtocolError::WrongArgCount("zadd"));
     }
 
     let mut members = Vec::with_capacity(remaining.len() / 2);
@@ -103,20 +100,20 @@ impl ZAddCommand {
           let s = String::from_utf8_lossy(data);
           match s.parse::<f64>() {
             Ok(v) => v,
-            Err(_) => return Err(Value::error("ERR value is not a valid float")),
+            Err(_) => return Err(ProtocolError::Custom("ERR value is not a valid float")),
           }
         }
         Value::SimpleString(s) => match s.parse::<f64>() {
           Ok(v) => v,
-          Err(_) => return Err(Value::error("ERR value is not a valid float")),
+          Err(_) => return Err(ProtocolError::Custom("ERR value is not a valid float")),
         },
-        _ => return Err(Value::error("ERR value is not a valid float")),
+        _ => return Err(ProtocolError::Custom("ERR value is not a valid float")),
       };
 
       let member = match &remaining[j + 1] {
         Value::BulkString(Some(data)) => data.clone(),
         Value::SimpleString(s) => s.as_bytes().to_vec(),
-        _ => return Err(Value::error("ERR invalid member")),
+        _ => return Err(ProtocolError::InvalidArgument("member")),
       };
 
       members.push((member, score));
@@ -143,19 +140,14 @@ impl ZAddCommand {
 
 #[async_trait]
 impl Command for ZAddCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let args = match Self::parse_args(items) {
-      Ok(args) => args,
-      Err(err) => return err,
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let args = Self::parse_args(items)?;
 
-    let mut metadata = match server.get(&args.key).await {
-      Ok(Some(raw_meta)) => match ZSetMetadata::deserialize(&raw_meta) {
+    let mut metadata = match server.get(&args.key).await? {
+      Some(raw_meta) => match ZSetMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           if meta.get_type() != TYPE_ZSET {
-            return Value::error(
-              "WRONGTYPE Operation against a key holding the wrong kind of value",
-            );
+            return Err(ProtocolError::WrongType.into());
           }
           if meta.is_expired(now_ms()) {
             ZSetMetadata::new()
@@ -165,7 +157,7 @@ impl Command for ZAddCommand {
         }
         Err(_) => ZSetMetadata::new(),
       },
-      _ => ZSetMetadata::new(),
+      None => ZSetMetadata::new(),
     };
 
     let version = metadata.version;
@@ -176,8 +168,8 @@ impl Command for ZAddCommand {
     for (member, score) in &args.members {
       let sub_key_str = ZSetMemberValue::build_sub_key_hex(args.key.as_bytes(), version, member);
 
-      let member_exists = match server.get(&sub_key_str).await {
-        Ok(Some(raw_val)) => match ZSetMemberValue::deserialize(&raw_val) {
+      let member_exists = match server.get(&sub_key_str).await? {
+        Some(raw_val) => match ZSetMemberValue::deserialize(&raw_val) {
           Ok(existing) => {
             // NX: skip if already exists
             if args.nx {
@@ -203,7 +195,7 @@ impl Command for ZAddCommand {
           }
           Err(_) => false,
         },
-        _ => false,
+        None => false,
       };
 
       if !member_exists {
@@ -223,15 +215,13 @@ impl Command for ZAddCommand {
 
     entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
-    if let Err(e) = server.batch_write(entries).await {
-      return Value::error(format!("ERR failed to batch write: {}", e));
-    }
+    server.batch_write(entries).await?;
 
-    if args.ch {
+    Ok(if args.ch {
       Value::Integer(added_count + updated_count)
     } else {
       Value::Integer(added_count)
-    }
+    })
   }
 }
 

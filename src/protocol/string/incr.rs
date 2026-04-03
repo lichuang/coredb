@@ -1,4 +1,5 @@
 use crate::encoding::StringValue;
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -12,18 +13,18 @@ pub struct IncrParams {
 }
 
 impl IncrParams {
-  fn parse(items: &[Value]) -> Option<Self> {
+  fn parse(items: &[Value]) -> Result<Self, ProtocolError> {
     if items.len() != 2 {
-      return None;
+      return Err(ProtocolError::WrongArgCount("INCR"));
     }
 
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return None,
+      _ => return Err(ProtocolError::InvalidArgument("key")),
     };
 
-    Some(IncrParams { key })
+    Ok(IncrParams { key })
   }
 }
 
@@ -38,11 +39,8 @@ pub struct IncrCommand;
 
 #[async_trait]
 impl Command for IncrCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
-    let params = match IncrParams::parse(items) {
-      Some(params) => params,
-      None => return Value::error("ERR wrong number of arguments for 'incr' command"),
-    };
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
+    let params = IncrParams::parse(items)?;
 
     let now = now_ms();
 
@@ -57,9 +55,7 @@ impl Command for IncrCommand {
             Some(string_value)
           }
         }
-        Err(_) => {
-          return Value::error("WRONGTYPE Operation against a key holding the wrong kind of value");
-        }
+        Err(_) => return Err(ProtocolError::WrongType.into()),
       },
       Ok(None) => None,
       Err(_) => None,
@@ -69,7 +65,7 @@ impl Command for IncrCommand {
     let current_int: i64 = match current_value {
       Some(ref sv) => match parse_i64(&sv.data) {
         Some(n) => n,
-        None => return Value::error("ERR value is not an integer or out of range"),
+        None => return Err(ProtocolError::NotAnInteger.into()),
       },
       None => 0,
     };
@@ -77,7 +73,7 @@ impl Command for IncrCommand {
     // Increment and check overflow
     let new_int = match current_int.checked_add(1) {
       Some(n) => n,
-      None => return Value::error("ERR increment would produce NaN or Infinity"),
+      None => return Err(ProtocolError::Overflow.into()),
     };
 
     // Preserve existing TTL if key existed and had one
@@ -91,12 +87,9 @@ impl Command for IncrCommand {
       StringValue::new(new_int.to_string().into_bytes())
     };
 
-    // Store the new value
     let serialized = new_string_value.serialize();
-    match server.set(params.key, serialized).await {
-      Ok(_) => Value::Integer(new_int),
-      Err(e) => Value::error(format!("ERR {}", e)),
-    }
+    server.set(params.key, serialized).await?;
+    Ok(Value::Integer(new_int))
   }
 }
 
@@ -127,7 +120,7 @@ mod tests {
   #[test]
   fn test_incr_params_parse_no_key() {
     let items = vec![Value::BulkString(Some(b"INCR".to_vec()))];
-    assert!(IncrParams::parse(&items).is_none());
+    assert!(IncrParams::parse(&items).is_err());
   }
 
   #[test]
@@ -137,7 +130,7 @@ mod tests {
       Value::BulkString(Some(b"mykey".to_vec())),
       Value::BulkString(Some(b"extra".to_vec())),
     ];
-    assert!(IncrParams::parse(&items).is_none());
+    assert!(IncrParams::parse(&items).is_err());
   }
 
   #[test]
@@ -163,7 +156,7 @@ mod tests {
     assert_eq!(parse_i64(b"  "), None);
     assert_eq!(parse_i64(b"abc"), None);
     assert_eq!(parse_i64(b"12abc"), None);
-    assert_eq!(parse_i64(b"9223372036854775808"), None); // Overflow
-    assert_eq!(parse_i64(b"-9223372036854775809"), None); // Underflow
+    assert_eq!(parse_i64(b"9223372036854775808"), None);
+    assert_eq!(parse_i64(b"-9223372036854775809"), None);
   }
 }

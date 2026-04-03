@@ -2,13 +2,9 @@
 //!
 //! HGETALL key
 //! Returns all fields and values of the hash stored at key.
-//!
-//! Return value:
-//! - Array of fields and values: [field1, value1, field2, value2, ...]
-//! - Empty array if key does not exist
-//! - Error if key exists but is not a hash
 
 use crate::encoding::{HashFieldValue, HashMetadata};
+use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
@@ -20,53 +16,48 @@ pub struct HGetAllCommand;
 
 #[async_trait]
 impl Command for HGetAllCommand {
-  async fn execute(&self, items: &[Value], server: &Server) -> Value {
+  async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     // Parse HGETALL key (exactly 2 items: command + key)
     if items.len() != 2 {
-      return Value::error("ERR wrong number of arguments for 'hgetall' command");
+      return Err(ProtocolError::WrongArgCount("hgetall").into());
     }
 
     // Parse key
     let key = match &items[1] {
       Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_string(),
       Value::SimpleString(s) => s.clone(),
-      _ => return Value::error("ERR invalid key"),
+      _ => return Err(ProtocolError::InvalidArgument("key").into()),
     };
 
     // Get metadata
-    let metadata = match server.get(&key).await {
-      Ok(Some(raw_meta)) => match HashMetadata::deserialize(&raw_meta) {
+    let metadata = match server.get(&key).await? {
+      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
             // Expired, return empty array
-            return Value::Array(Some(vec![]));
+            return Ok(Value::Array(Some(vec![])));
           }
           meta
         }
         Err(_) => {
           // Corrupted metadata, return empty array
-          return Value::Array(Some(vec![]));
+          return Ok(Value::Array(Some(vec![])));
         }
       },
-      _ => {
+      None => {
         // Key not found, return empty array
-        return Value::Array(Some(vec![]));
+        return Ok(Value::Array(Some(vec![])));
       }
     };
 
     let version = metadata.version;
 
     // Build the hex-encoded prefix for scanning: hex(key_len|key|version)
-    // All hash sub-keys are stored with hex encoding, so we scan with hex prefix
     let prefix_hex = build_field_prefix_hex(key.as_bytes(), version);
 
-    // Scan for all field-value pairs with this prefix (forwarded to leader)
-    // Note: scan_prefix returns hex-encoded keys, we need to decode them
-    let scan_results = match server.scan_prefix(prefix_hex.as_bytes()).await {
-      Ok(results) => results,
-      Err(e) => return Value::error(format!("ERR failed to scan hash fields: {}", e)),
-    };
+    // Scan for all field-value pairs with this prefix
+    let scan_results = server.scan_prefix(prefix_hex.as_bytes()).await?;
 
     // Parse results and build response array
     let mut result_array = Vec::with_capacity(scan_results.len() * 2);
@@ -93,7 +84,7 @@ impl Command for HGetAllCommand {
       }
     }
 
-    Value::Array(Some(result_array))
+    Ok(Value::Array(Some(result_array)))
   }
 }
 

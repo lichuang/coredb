@@ -241,7 +241,7 @@ print(r.get('key'))
 | `ZADD key [NX\|XX] [GT\|LT] [CH] [INCR] score member [score member ...]` | Add member(s) with score | ✅ |
 | `ZREM key member [member ...]` | Remove member(s) | ✅ |
 | `ZRANGE key start stop [WITHSCORES]` | Get range by rank | ✅ |
-| `ZREVRANGE key start stop [WITHSCORES]` | Get range by rank (reverse) | ❌ |
+| `ZREVRANGE key start stop [WITHSCORES]` | Get range by rank (reverse) | ✅ |
 | `ZRANGEBYSCORE key min max [WITHSCORES] [LIMIT offset count]` | Get range by score | ❌ |
 | `ZSCORE key member` | Get member score | ❌ |
 | `ZCARD key` | Get sorted set cardinality | ❌ |

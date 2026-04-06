@@ -1019,6 +1019,273 @@ class TestClusterZSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    # ==================== ZREVRANGE Tests ====================
+
+    def test_zrevrange_basic(self) -> bool:
+        """Test ZREVRANGE returns members in descending score order."""
+        print("\nTest: ZREVRANGE basic")
+
+        key = "zrevrange_basic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"c": 3.0, "a": 1.0, "b": 2.0})
+
+        print(f"  ZREVRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrevrange(key, 0, -1)
+            if result != ["c", "b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['c', 'b', 'a'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE returned ['c', 'b', 'a']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_with_scores(self) -> bool:
+        """Test ZREVRANGE WITHSCORES returns member-score pairs in reverse order."""
+        print("\nTest: ZREVRANGE WITHSCORES")
+
+        key = "zrevrange_scores"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print(f"  ZREVRANGE '{key}' 0 -1 WITHSCORES...")
+        try:
+            result = write_node.zrevrange(key, 0, -1, withscores=True)
+            expected = [("c", 3.0), ("b", 2.0), ("a", 1.0)]
+            if result != expected:
+                print(f"\033[31m  FAILED: Expected {expected}, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE WITHSCORES returned correct pairs: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_subset(self) -> bool:
+        """Test ZREVRANGE with positive start and stop indices."""
+        print("\nTest: ZREVRANGE subset")
+
+        key = "zrevrange_subset"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0, "e": 5.0})
+
+        print(f"  ZREVRANGE '{key}' 1 3...")
+        try:
+            result = write_node.zrevrange(key, 1, 3)
+            if result != ["d", "c", "b"]:
+                print(f"\033[31m  FAILED: Expected ['d', 'c', 'b'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE 1 3 returned ['d', 'c', 'b']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_negative_indices(self) -> bool:
+        """Test ZREVRANGE with negative start and stop indices."""
+        print("\nTest: ZREVRANGE negative indices")
+
+        key = "zrevrange_neg"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0})
+
+        print(f"  ZREVRANGE '{key}' -3 -1...")
+        try:
+            result = write_node.zrevrange(key, -3, -1)
+            if result != ["c", "b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['c', 'b', 'a'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE -3 -1 returned ['c', 'b', 'a']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_start_greater_than_stop(self) -> bool:
+        """Test ZREVRANGE returns empty when start > stop."""
+        print("\nTest: ZREVRANGE start > stop")
+
+        key = "zrevrange_empty"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZREVRANGE '{key}' 2 1...")
+        try:
+            result = write_node.zrevrange(key, 2, 1)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE 2 1 returned []: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_out_of_range(self) -> bool:
+        """Test ZREVRANGE with indices beyond the set size."""
+        print("\nTest: ZREVRANGE out of range")
+
+        key = "zrevrange_oor"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0})
+
+        print(f"  ZREVRANGE '{key}' 0 100...")
+        try:
+            result = write_node.zrevrange(key, 0, 100)
+            if result != ["b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['b', 'a'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE 0 100 returned ['b', 'a']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_nonexistent_key(self) -> bool:
+        """Test ZREVRANGE on a non-existent key returns empty array."""
+        print("\nTest: ZREVRANGE non-existent key")
+
+        key = "zrevrange_noexist"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  ZREVRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrevrange(key, 0, -1)
+            if result != []:
+                print(f"\033[31m  FAILED: Expected [], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE on non-existent key returned []: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_wrong_type(self) -> bool:
+        """Test ZREVRANGE on a key holding wrong type."""
+        print("\nTest: ZREVRANGE wrong type error")
+
+        key = "zrevrange_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  ZREVRANGE on string key '{key}'...")
+        try:
+            write_node.zrevrange(key, 0, -1)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_single_element(self) -> bool:
+        """Test ZREVRANGE with a single element sorted set."""
+        print("\nTest: ZREVRANGE single element")
+
+        key = "zrevrange_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"only": 42.0})
+
+        print(f"  ZREVRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrevrange(key, 0, -1)
+            if result != ["only"]:
+                print(f"\033[31m  FAILED: Expected ['only'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE returned ['only']: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_equal_scores(self) -> bool:
+        """Test ZREVRANGE with equal scores uses reverse lexicographic member order."""
+        print("\nTest: ZREVRANGE equal scores")
+
+        key = "zrevrange_equal"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"c": 1.0, "a": 1.0, "b": 1.0})
+
+        print(f"  ZREVRANGE '{key}' 0 -1...")
+        try:
+            result = write_node.zrevrange(key, 0, -1)
+            if result != ["c", "b", "a"]:
+                print(f"\033[31m  FAILED: Expected ['c', 'b', 'a'], got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: ZREVRANGE failed - {e}")
+            return False
+
+        print("  ZREVRANGE returned ['c', 'b', 'a'] (reverse lexicographic): OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_zrevrange_replication(self) -> bool:
+        """Test that ZREVRANGE reads replicated data from all nodes."""
+        print("\nTest: ZREVRANGE replication")
+
+        key = "zrevrange_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.zadd(key, {"a": 1.0, "b": 2.0, "c": 3.0})
+
+        print("  ZREVRANGE from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.zrevrange(key, 0, -1)
+                if result != ["c", "b", "a"]:
+                    print(f"    Node {i}: FAILED (expected ['c', 'b', 'a'], got {result})")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all zset tests."""
         print("\n" + "=" * 50)
@@ -1066,6 +1333,18 @@ class TestClusterZSet(TestClusterBase):
             self.test_zrange_single_element,
             self.test_zrange_equal_scores,
             self.test_zrange_replication,
+            # ZREVRANGE tests
+            self.test_zrevrange_basic,
+            self.test_zrevrange_with_scores,
+            self.test_zrevrange_subset,
+            self.test_zrevrange_negative_indices,
+            self.test_zrevrange_start_greater_than_stop,
+            self.test_zrevrange_out_of_range,
+            self.test_zrevrange_nonexistent_key,
+            self.test_zrevrange_wrong_type,
+            self.test_zrevrange_single_element,
+            self.test_zrevrange_equal_scores,
+            self.test_zrevrange_replication,
         ]
 
         passed = 0

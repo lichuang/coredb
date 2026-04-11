@@ -34,7 +34,9 @@ impl Server {
   pub async fn start(config: Config) -> Result<Arc<Self>, CoreDbError> {
     // Create and start Raft node
     info!("Creating Raft node...");
-    let raft_node = RaftNodeBuilder::build(&config.raft)
+    let raft_node = RaftNodeBuilder::new()
+      .config(&config.raft)
+      .build()
       .await
       .map_err(|e| StorageError::Raft(format!("Failed to create Raft node: {}", e)))?;
     info!("Raft node created and started successfully");
@@ -201,7 +203,7 @@ impl Server {
   pub async fn run(self: Arc<Self>) {
     info!("Server started, listening on {}", self.local_addr);
     info!("Raft node ID: {}", self.config.raft.node_id);
-    info!("Raft address: {}", self.config.raft.raft.address);
+    info!("Raft endpoint: {}", self.config.raft.raft.endpoint);
 
     loop {
       match self.listener.accept().await {

@@ -55,9 +55,6 @@ impl Config {
     let config: Config = toml::from_str(&config_str)
       .map_err(|e| format!("Failed to parse config file '{}': {}", path, e))?;
 
-    // Validate rockraft config
-    config.raft.validate()?;
-
     Ok(config)
   }
 }
@@ -86,7 +83,7 @@ max_open_files = 10000
     let config: Config = toml::from_str(config_str).unwrap();
     assert_eq!(config.raft.node_id, 1);
     assert_eq!(config.server_addr, "0.0.0.0:6379");
-    assert_eq!(config.raft.raft.address, "127.0.0.1:7001");
+    assert_eq!(config.raft.raft.endpoint.to_string(), "127.0.0.1:7001");
     assert!(config.raft.raft.single);
   }
 }

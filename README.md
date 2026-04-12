@@ -28,8 +28,9 @@ server_addr = "0.0.0.0:6379"
 [raft]
 address = "127.0.0.1:7001"
 advertise_host = "localhost"
-single = true  # Set to false for cluster mode
-join = []      # Addresses to join for cluster mode
+# Empty join list means single-node mode
+# For cluster mode, set join = ["leader-address:port"]
+join = []
 
 [rocksdb]
 data_path = "/tmp/coredb/node1"
@@ -47,8 +48,7 @@ level = "info"
 | `server_addr` | Redis protocol listening address |
 | `raft.address` | Raft consensus listening address |
 | `raft.advertise_host` | Host advertised to other nodes |
-| `raft.single` | Run as single node (no cluster) |
-| `raft.join` | List of nodes to join for cluster mode |
+| `raft.join` | Empty for single-node, or list of nodes to join |
 | `rocksdb.data_path` | RocksDB data directory |
 | `rocksdb.max_open_files` | Max open files for RocksDB |
 | `log.level` | Log level (debug, info, warn, error) |

@@ -1025,6 +1025,7 @@ class TestClusterList(TestClusterBase):
         failed = 0
 
         for test in tests:
+            print(f"\n\033[36m[running]\033[0m {test.__name__}")
             try:
                 if test():
                     passed += 1

@@ -72,7 +72,7 @@ server_addr = "0.0.0.0:6379"
 [raft]
 address = "127.0.0.1:7001"
 advertise_host = "localhost"
-single = true
+# Empty join list means single-node mode
 join = []
 
 [rocksdb]
@@ -84,6 +84,6 @@ max_open_files = 10000
     assert_eq!(config.raft.node_id, 1);
     assert_eq!(config.server_addr, "0.0.0.0:6379");
     assert_eq!(config.raft.raft.endpoint.to_string(), "127.0.0.1:7001");
-    assert!(config.raft.raft.single);
+    assert!(config.raft.raft.join.is_empty()); // Empty join means single-node mode
   }
 }

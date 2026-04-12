@@ -7,7 +7,7 @@ server_addr = "0.0.0.0:6381"
 [raft]
 address = "127.0.0.1:7003"
 advertise_host = "localhost"
-single = false
+# Join existing cluster via node1
 join = ["localhost:7001"]
 
 [rocksdb]

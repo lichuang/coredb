@@ -54,7 +54,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   info!("  server_addr: {}", config.server_addr);
   info!("  raft_addr: {}", config.raft.raft.endpoint);
   info!("  data_path: {}", config.raft.rocksdb.data_path);
-  info!("  single: {}", config.raft.raft.single);
   info!("  join: {:?}", config.raft.raft.join);
 
   // Create and start server (which creates Raft node internally)

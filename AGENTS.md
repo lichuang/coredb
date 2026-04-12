@@ -307,8 +307,9 @@ server_addr = "0.0.0.0:6379"
 [raft]
 address = "127.0.0.1:7001"
 advertise_host = "localhost"
-single = true   # Set to false for cluster mode
-join = []       # Addresses to join for cluster mode
+# Empty join list means single-node mode
+# For cluster mode, set join = ["leader-address:port"]
+join = []
 
 [rocksdb]
 data_path = "/tmp/coredb/node1"

@@ -4467,6 +4467,148 @@ class TestClusterString(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
     
+    def test_ttl_nonexistent_key(self) -> bool:
+        """Test TTL on non-existent key returns -2."""
+        print("\nTest: TTL non-existent key")
+        
+        test_key = "ttl_nonexistent_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result != -2:
+                print(f"\033[31m  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print("  TTL returned -2: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_no_expiration(self) -> bool:
+        """Test TTL on key without expiration returns -1."""
+        print("\nTest: TTL no expiration")
+        
+        test_key = "ttl_no_exp_key"
+        test_value = "ttl_no_exp_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result != -1:
+                print(f"\033[31m  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print("  TTL returned -1: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_with_expiration(self) -> bool:
+        """Test TTL on key with expiration returns remaining seconds."""
+        print("\nTest: TTL with expiration")
+        
+        test_key = "ttl_with_exp_key"
+        test_value = "ttl_with_exp_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, ex=10)
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 8 or result > 10:
+                print(f"\033[31m  FAILED: Expected TTL between 8 and 10, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_expired_key(self) -> bool:
+        """Test TTL on expired key returns -2."""
+        print("\nTest: TTL expired key")
+        
+        test_key = "ttl_expired_key"
+        test_value = "ttl_expired_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, px=100)
+        time.sleep(0.3)
+        
+        print(f"  TTL '{test_key}' after expiration...")
+        try:
+            result = write_node.ttl(test_key)
+            if result != -2:
+                print(f"\033[31m  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print("  TTL returned -2: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_after_expire(self) -> bool:
+        """Test TTL after EXPIRE command."""
+        print("\nTest: TTL after EXPIRE")
+        
+        test_key = "ttl_after_expire_key"
+        test_value = "ttl_after_expire_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.expire(test_key, 100)
+        
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 98 or result > 100:
+                print(f"\033[31m  FAILED: Expected TTL between 98 and 100, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_hash_key(self) -> bool:
+        """Test TTL on hash key."""
+        print("\nTest: TTL on hash key")
+        
+        test_key = "ttl_hash_key"
+        write_node = self._get_random_node()
+        
+        write_node.hset(test_key, "field", "value")
+        write_node.expire(test_key, 50)
+        
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 48 or result > 50:
+                print(f"\033[31m  FAILED: Expected TTL between 48 and 50, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -4602,6 +4744,12 @@ class TestClusterString(TestClusterBase):
             self.test_pexpire_preserves_value,
             self.test_pexpire_negative_milliseconds,
             self.test_pexpire_update_existing_ttl,
+            self.test_ttl_nonexistent_key,
+            self.test_ttl_no_expiration,
+            self.test_ttl_with_expiration,
+            self.test_ttl_expired_key,
+            self.test_ttl_after_expire,
+            self.test_ttl_hash_key,
         ]
         
         passed = 0

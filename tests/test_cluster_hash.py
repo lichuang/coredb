@@ -19,6 +19,7 @@ import random
 import sys
 import os
 import signal
+import time
 
 import redis
 
@@ -1696,6 +1697,55 @@ class TestClusterHash(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_hash_ttl(self) -> bool:
+        """Test TTL on hash key."""
+        print("\nTest: Hash TTL")
+        
+        test_key = "hash_ttl_key"
+        write_node = self._get_random_node()
+        
+        write_node.hset(test_key, "field", "value")
+        write_node.expire(test_key, 60)
+        
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 58 or result > 60:
+                print(f"\033[31m  FAILED: Expected TTL between 58 and 60, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_hash_ttl_expired(self) -> bool:
+        """Test TTL on expired hash key returns -2."""
+        print("\nTest: Hash TTL expired")
+        
+        test_key = "hash_ttl_expired_key"
+        write_node = self._get_random_node()
+        
+        write_node.hset(test_key, "field", "value")
+        write_node.pexpire(test_key, 100)
+        time.sleep(0.3)
+        
+        print(f"  TTL '{test_key}' after expiration...")
+        try:
+            result = write_node.ttl(test_key)
+            if result != -2:
+                print(f"\033[31m  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print("  TTL returned -2: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def test_chaos_hset_hget(self) -> bool:
         """Test HSET/HGET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - HSET/HGET with one node down + recovery verification")
@@ -1817,6 +1867,8 @@ class TestClusterHash(TestClusterBase):
             self.test_hincrby_overflow,
             self.test_hincrby_replication,
             self.test_hincrby_atomicity_consistency,
+            self.test_hash_ttl,
+            self.test_hash_ttl_expired,
             self.test_chaos_hset_hget,
         ]
         

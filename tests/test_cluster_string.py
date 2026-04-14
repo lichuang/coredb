@@ -4609,6 +4609,81 @@ class TestClusterString(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
     
+    def test_ttl_replication(self) -> bool:
+        """Test TTL replicates correctly across all nodes."""
+        print("\nTest: TTL replication")
+        
+        test_key = "ttl_repl_key"
+        test_value = "ttl_repl_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.expire(test_key, 100)
+        
+        print("  TTL from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.ttl(test_key)
+                if result < 98 or result > 100:
+                    print(f"    Node {i}: FAILED (expected TTL between 98 and 100, got {result})")
+                    return False
+                print(f"    Node {i}: OK (TTL={result})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_after_pexpire(self) -> bool:
+        """Test TTL after PEXPIRE command."""
+        print("\nTest: TTL after PEXPIRE")
+        
+        test_key = "ttl_after_pexpire_key"
+        test_value = "ttl_after_pexpire_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.pexpire(test_key, 50000)
+        
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 48 or result > 50:
+                print(f"\033[31m  FAILED: Expected TTL between 48 and 50, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_ttl_after_set_px(self) -> bool:
+        """Test TTL after SET with PX option."""
+        print("\nTest: TTL after SET PX")
+        
+        test_key = "ttl_set_px_key"
+        test_value = "ttl_set_px_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, px=30000)
+        
+        print(f"  TTL '{test_key}'...")
+        try:
+            result = write_node.ttl(test_key)
+            if result < 28 or result > 30:
+                print(f"\033[31m  FAILED: Expected TTL between 28 and 30, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: TTL failed - {e}")
+            return False
+        print(f"  TTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -4750,6 +4825,9 @@ class TestClusterString(TestClusterBase):
             self.test_ttl_expired_key,
             self.test_ttl_after_expire,
             self.test_ttl_hash_key,
+            self.test_ttl_replication,
+            self.test_ttl_after_pexpire,
+            self.test_ttl_after_set_px,
         ]
         
         passed = 0

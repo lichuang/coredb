@@ -4684,6 +4684,223 @@ class TestClusterString(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
     
+    def test_pttl_nonexistent_key(self) -> bool:
+        """Test PTTL on non-existent key returns -2."""
+        print("\nTest: PTTL non-existent key")
+        
+        test_key = "pttl_nonexistent_key"
+        write_node = self._get_random_node()
+        
+        write_node.delete(test_key)
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result != -2:
+                print(f"\033[31m  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print("  PTTL returned -2: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_no_expiration(self) -> bool:
+        """Test PTTL on key without expiration returns -1."""
+        print("\nTest: PTTL no expiration")
+        
+        test_key = "pttl_no_exp_key"
+        test_value = "pttl_no_exp_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result != -1:
+                print(f"\033[31m  FAILED: Expected -1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print("  PTTL returned -1: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_with_expiration(self) -> bool:
+        """Test PTTL on key with expiration returns remaining milliseconds."""
+        print("\nTest: PTTL with expiration")
+        
+        test_key = "pttl_with_exp_key"
+        test_value = "pttl_with_exp_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, px=10000)
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result < 8000 or result > 10000:
+                print(f"\033[31m  FAILED: Expected PTTL between 8000 and 10000, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print(f"  PTTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_expired_key(self) -> bool:
+        """Test PTTL on expired key returns -2."""
+        print("\nTest: PTTL expired key")
+        
+        test_key = "pttl_expired_key"
+        test_value = "pttl_expired_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, px=100)
+        time.sleep(0.3)
+        
+        print(f"  PTTL '{test_key}' after expiration...")
+        try:
+            result = write_node.pttl(test_key)
+            if result != -2:
+                print(f"\033[31m  FAILED: Expected -2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print("  PTTL returned -2: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_after_expire(self) -> bool:
+        """Test PTTL after EXPIRE command."""
+        print("\nTest: PTTL after EXPIRE")
+        
+        test_key = "pttl_after_expire_key"
+        test_value = "pttl_after_expire_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.expire(test_key, 10)
+        
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result < 8000 or result > 10000:
+                print(f"\033[31m  FAILED: Expected PTTL between 8000 and 10000, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print(f"  PTTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_after_pexpire(self) -> bool:
+        """Test PTTL after PEXPIRE command."""
+        print("\nTest: PTTL after PEXPIRE")
+        
+        test_key = "pttl_after_pexpire_key"
+        test_value = "pttl_after_pexpire_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.pexpire(test_key, 50000)
+        
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result < 48000 or result > 50000:
+                print(f"\033[31m  FAILED: Expected PTTL between 48000 and 50000, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print(f"  PTTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_hash_key(self) -> bool:
+        """Test PTTL on hash key."""
+        print("\nTest: PTTL on hash key")
+        
+        test_key = "pttl_hash_key"
+        write_node = self._get_random_node()
+        
+        write_node.hset(test_key, "field", "value")
+        write_node.expire(test_key, 50)
+        
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result < 48000 or result > 50000:
+                print(f"\033[31m  FAILED: Expected PTTL between 48000 and 50000, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print(f"  PTTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_replication(self) -> bool:
+        """Test PTTL replicates correctly across all nodes."""
+        print("\nTest: PTTL replication")
+        
+        test_key = "pttl_repl_key"
+        test_value = "pttl_repl_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value)
+        write_node.expire(test_key, 100)
+        
+        print("  PTTL from all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.pttl(test_key)
+                if result < 98000 or result > 100000:
+                    print(f"    Node {i}: FAILED (expected PTTL between 98000 and 100000, got {result})")
+                    return False
+                print(f"    Node {i}: OK (PTTL={result})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_pttl_after_set_px(self) -> bool:
+        """Test PTTL after SET with PX option."""
+        print("\nTest: PTTL after SET PX")
+        
+        test_key = "pttl_set_px_key"
+        test_value = "pttl_set_px_value"
+        write_node = self._get_random_node()
+        
+        write_node.set(test_key, test_value, px=30000)
+        
+        print(f"  PTTL '{test_key}'...")
+        try:
+            result = write_node.pttl(test_key)
+            if result < 28000 or result > 30000:
+                print(f"\033[31m  FAILED: Expected PTTL between 28000 and 30000, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PTTL failed - {e}")
+            return False
+        print(f"  PTTL returned {result}: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -4828,6 +5045,15 @@ class TestClusterString(TestClusterBase):
             self.test_ttl_replication,
             self.test_ttl_after_pexpire,
             self.test_ttl_after_set_px,
+            self.test_pttl_nonexistent_key,
+            self.test_pttl_no_expiration,
+            self.test_pttl_with_expiration,
+            self.test_pttl_expired_key,
+            self.test_pttl_after_expire,
+            self.test_pttl_after_pexpire,
+            self.test_pttl_hash_key,
+            self.test_pttl_replication,
+            self.test_pttl_after_set_px,
         ]
         
         passed = 0

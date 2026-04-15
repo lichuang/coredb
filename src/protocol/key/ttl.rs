@@ -43,11 +43,7 @@ impl TtlParams {
 }
 
 /// Read the expiration timestamp of a key, handling expiration detection.
-/// Returns:
-/// - `None` if the key does not exist or is expired
-/// - `Some(0)` if the key exists but has no expiration
-/// - `Some(expires_at)` if the key exists and has an expiration
-async fn read_expires_at(server: &Server, key: &str) -> Option<u64> {
+pub async fn read_expires_at(server: &Server, key: &str) -> Option<u64> {
   let raw_value = match server.get(key).await {
     Ok(Some(v)) => v,
     _ => return None,

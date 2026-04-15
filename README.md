@@ -194,7 +194,7 @@ print(r.get('key'))
 | `EXPIRE key seconds [NX|XX|GT|LT]` | Set expiration in seconds | ✅ |
 | `PEXPIRE key milliseconds [NX|XX|GT|LT]` | Set expiration in ms | ✅ |
 | `TTL key` | Get remaining TTL | ✅ |
-| `PTTL key` | Get remaining TTL in ms | ❌ |
+| `PTTL key` | Get remaining TTL in ms | ✅ |
 | `PERSIST key` | Remove expiration | ❌ |
 | `KEYS pattern` | Find keys matching pattern | ❌ |
 | `RENAME key newkey` | Rename key | ❌ |

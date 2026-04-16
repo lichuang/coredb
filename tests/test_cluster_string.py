@@ -5124,6 +5124,236 @@ class TestClusterString(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
     
+    def test_persist_basic(self) -> bool:
+        """Test PERSIST removes TTL from a key with expiration."""
+        print("\nTest: PERSIST basic")
+        
+        test_key = "persist_basic_key"
+        test_value = "persist_basic_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set a key with expiration
+        write_node.set(test_key, test_value, px=30000)
+        
+        # Verify TTL is set
+        pttl = write_node.pttl(test_key)
+        if pttl < 0:
+            print(f"\033[31m  FAILED: Expected positive TTL, got {pttl}")
+            return False
+        print(f"  PTTL before PERSIST: {pttl}")
+        
+        # PERSIST the key
+        try:
+            result = write_node.persist(test_key)
+            if result != True:
+                print(f"\033[31m  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PERSIST failed - {e}")
+            return False
+        print("  PERSIST returned True: OK")
+        
+        # Verify TTL is now -1 (no expiration)
+        ttl = write_node.ttl(test_key)
+        if ttl != -1:
+            print(f"\033[31m  FAILED: Expected TTL -1, got {ttl}")
+            return False
+        print("  TTL after PERSIST is -1: OK")
+        
+        # Verify key still has its value
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"\033[31m  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        print("  Value preserved: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_nonexistent_key(self) -> bool:
+        """Test PERSIST on non-existent key returns False."""
+        print("\nTest: PERSIST non-existent key")
+        
+        test_key = "persist_nonexistent_key"
+        
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+        
+        try:
+            result = write_node.persist(test_key)
+            if result != False:
+                print(f"\033[31m  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PERSIST failed - {e}")
+            return False
+        print("  PERSIST returned False: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_no_expiration(self) -> bool:
+        """Test PERSIST on key without TTL returns False."""
+        print("\nTest: PERSIST key without expiration")
+        
+        test_key = "persist_no_ttl_key"
+        test_value = "persist_no_ttl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set a key WITHOUT expiration
+        write_node.set(test_key, test_value)
+        
+        # PERSIST should return False (no timeout to remove)
+        try:
+            result = write_node.persist(test_key)
+            if result != False:
+                print(f"\033[31m  FAILED: Expected False, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PERSIST failed - {e}")
+            return False
+        print("  PERSIST returned False for key without TTL: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_preserves_value(self) -> bool:
+        """Test PERSIST preserves the key's value."""
+        print("\nTest: PERSIST preserves value")
+        
+        test_key = "persist_value_key"
+        test_value = "persist_value_" + "x" * 1000
+        
+        write_node = self._get_random_node()
+        
+        # Set with expiration
+        write_node.set(test_key, test_value, px=5000)
+        
+        # PERSIST
+        write_node.persist(test_key)
+        
+        # Value should be unchanged
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"\033[31m  FAILED: Value changed after PERSIST")
+            return False
+        print("  Value preserved after PERSIST: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_replication(self) -> bool:
+        """Test PERSIST replicates to all nodes."""
+        print("\nTest: PERSIST replication")
+        
+        test_key = "persist_repl_key"
+        test_value = "persist_repl_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set with expiration
+        write_node.set(test_key, test_value, px=30000)
+        
+        # PERSIST on one node
+        write_node.persist(test_key)
+        
+        # Verify all nodes see no expiration
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                ttl = node.conn.ttl(test_key)
+                if ttl != -1:
+                    print(f"    Node {i}: FAILED (expected TTL -1, got {ttl})")
+                    return False
+                print(f"    Node {i}: OK (TTL = -1)")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_on_hash_key(self) -> bool:
+        """Test PERSIST works on hash keys."""
+        print("\nTest: PERSIST on hash key")
+        
+        test_key = "persist_hash_key"
+        
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+        
+        # Create a hash with expiration via PEXPIRE
+        write_node.hset(test_key, "field1", "value1")
+        write_node.pexpire(test_key, 30000)
+        
+        # Verify TTL is set
+        pttl = write_node.pttl(test_key)
+        if pttl < 0:
+            print(f"\033[31m  FAILED: Expected positive TTL on hash, got {pttl}")
+            return False
+        
+        # PERSIST
+        try:
+            result = write_node.persist(test_key)
+            if result != True:
+                print(f"\033[31m  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: PERSIST failed - {e}")
+            return False
+        print("  PERSIST returned True: OK")
+        
+        # Verify TTL is -1
+        ttl = write_node.ttl(test_key)
+        if ttl != -1:
+            print(f"\033[31m  FAILED: Expected TTL -1, got {ttl}")
+            return False
+        print("  TTL after PERSIST is -1: OK")
+        
+        # Verify hash data is intact
+        value = write_node.hget(test_key, "field1")
+        if value != "value1":
+            print(f"\033[31m  FAILED: Expected 'value1', got '{value}'")
+            return False
+        print("  Hash data preserved: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_persist_after_setex(self) -> bool:
+        """Test PERSIST after SETEX removes the expiration."""
+        print("\nTest: PERSIST after SETEX")
+        
+        test_key = "persist_setex_key"
+        test_value = "persist_setex_value"
+        
+        write_node = self._get_random_node()
+        
+        # SET with expiration via SETEX
+        write_node.setex(test_key, 30, test_value)
+        
+        # PERSIST
+        result = write_node.persist(test_key)
+        if result != True:
+            print(f"\033[31m  FAILED: Expected True, got {result}")
+            return False
+        
+        # Verify no expiration
+        ttl = write_node.ttl(test_key)
+        if ttl != -1:
+            print(f"\033[31m  FAILED: Expected TTL -1, got {ttl}")
+            return False
+        
+        # Verify value
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"\033[31m  FAILED: Expected '{test_value}', got '{value}'")
+            return False
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def run_all_tests(self) -> bool:
         """Run all tests."""
         print("\n" + "="*50)
@@ -5283,6 +5513,13 @@ class TestClusterString(TestClusterBase):
             self.test_pttl_hash_key,
             self.test_pttl_replication,
             self.test_pttl_after_set_px,
+            self.test_persist_basic,
+            self.test_persist_nonexistent_key,
+            self.test_persist_no_expiration,
+            self.test_persist_preserves_value,
+            self.test_persist_replication,
+            self.test_persist_on_hash_key,
+            self.test_persist_after_setex,
         ]
         
         passed = 0

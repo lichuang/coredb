@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use rockraft::node::{RaftNode, RaftNodeBuilder};
 use rockraft::raft::types::{
-  AppliedState, BatchWriteReq, Cmd, GetKVReq, LogEntry, ScanPrefixReq, UpsertKV,
+  AppliedState, BatchWriteReq, Cmd, GetKVReq, LogEntry, ScanPrefixReq, TxnReq, UpsertKV,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -125,6 +125,24 @@ impl Server {
       .batch_write(req)
       .await
       .map_err(|e| StorageError::WriteFailed(e.to_string()))
+  }
+
+  /// Atomically set a new value and return the previous value (through Raft consensus)
+  pub async fn getset(&self, key: &str, value: Vec<u8>) -> Result<Option<Vec<u8>>, StorageError> {
+    let req = TxnReq::new(vec![])
+      .if_then(UpsertKV::insert(key, &value))
+      .with_return_previous();
+
+    match self
+      .raft_node
+      .txn(req)
+      .await
+      .map_err(|e| StorageError::WriteFailed(e.to_string()))?
+    {
+      rockraft::raft::types::TxnReply::Success { prev_values, .. } => {
+        Ok(prev_values.into_iter().next().flatten())
+      }
+    }
   }
 
   /// Scan keys by prefix from the state machine (forwarded to leader)

@@ -3585,6 +3585,229 @@ class TestClusterString(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
     
+    def test_getset_existing_key(self) -> bool:
+        """Test GETSET on existing key returns old value and sets new value."""
+        print("\nTest: GETSET on existing key")
+        
+        test_key = "getset_existing_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value
+        print(f"  SET '{test_key}' = '{initial_value}'...")
+        write_node.set(test_key, initial_value)
+        
+        # GETSET should return old value and set new value
+        print(f"  GETSET '{test_key}' '{new_value}'...")
+        try:
+            result = write_node.getset(test_key, new_value)
+            if result != initial_value:
+                print(f"\033[31m  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: GETSET failed - {e}")
+            return False
+        
+        # Verify new value was set
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"\033[31m  FAILED: Key not updated, got '{value}', expected '{new_value}'")
+            return False
+        print(f"  Previous value '{result}' returned, key updated: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_getset_nonexistent_key(self) -> bool:
+        """Test GETSET on non-existent key returns nil and sets value."""
+        print("\nTest: GETSET on non-existent key")
+        
+        test_key = "getset_nonexistent_key"
+        test_value = "getset_value"
+        
+        write_node = self._get_random_node()
+        
+        # Make sure key doesn't exist
+        write_node.delete(test_key)
+        
+        # GETSET on non-existent key should return nil
+        print(f"  GETSET '{test_key}' '{test_value}' (non-existent)...")
+        try:
+            result = write_node.getset(test_key, test_value)
+            if result is not None:
+                print(f"\033[31m  FAILED: Expected None, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: GETSET failed - {e}")
+            return False
+        
+        # Verify value was set
+        value = write_node.get(test_key)
+        if value != test_value:
+            print(f"\033[31m  FAILED: Key not set, got '{value}'")
+            return False
+        print("  Returned nil, key set: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_getset_discards_ttl(self) -> bool:
+        """Test GETSET discards any previous TTL."""
+        print("\nTest: GETSET discards TTL")
+        
+        test_key = "getset_ttl_key"
+        initial_value = "initial_value"
+        new_value = "new_value"
+        
+        write_node = self._get_random_node()
+        
+        # Set with 500ms TTL
+        print(f"  SET '{test_key}' = '{initial_value}' with 500ms TTL...")
+        write_node.set(test_key, initial_value, px=500)
+        
+        # GETSET should return old value and discard TTL
+        print(f"  GETSET '{test_key}' '{new_value}'...")
+        try:
+            result = write_node.getset(test_key, new_value)
+            if result != initial_value:
+                print(f"\033[31m  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: GETSET failed - {e}")
+            return False
+        
+        # Wait for original TTL to pass
+        print("  Waiting 600ms (original TTL was 500ms)...")
+        time.sleep(0.6)
+        
+        # Key should still exist (TTL was discarded)
+        value = write_node.get(test_key)
+        if value != new_value:
+            print(f"\033[31m  FAILED: Key expired (TTL not discarded), got '{value}'")
+            return False
+        print("  Key still exists after original TTL: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_getset_wrong_type(self) -> bool:
+        """Test GETSET on non-string key returns WRONGTYPE error."""
+        print("\nTest: GETSET on hash key (wrong type)")
+        
+        test_key = "getset_wrong_type_key"
+        test_value = "getset_value"
+        
+        write_node = self._get_random_node()
+        
+        # Create a hash key
+        print(f"  HSET '{test_key}' field 'value'...")
+        try:
+            write_node.hset(test_key, "field", "value")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: HSET failed - {e}")
+            return False
+        
+        # GETSET on hash key should fail
+        print(f"  GETSET '{test_key}' '{test_value}' (should fail with WRONGTYPE)...")
+        try:
+            result = write_node.getset(test_key, test_value)
+            print(f"\033[31m  FAILED: Expected error but got result: {result}")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).upper()
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        # Verify hash was not modified
+        result = write_node.hget(test_key, "field")
+        if result != "value":
+            print(f"\033[31m  FAILED: Hash was modified, field value is '{result}'")
+            return False
+        print("  Hash unchanged: OK")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_getset_replication(self) -> bool:
+        """Test that GETSET results are replicated to all nodes."""
+        print("\nTest: GETSET replication")
+        
+        test_key = "getset_repl_key"
+        initial_value = "repl_initial"
+        new_value = "repl_new"
+        
+        write_node = self._get_random_node()
+        
+        # Set initial value
+        print(f"  SET '{test_key}' = '{initial_value}' on random node...")
+        write_node.set(test_key, initial_value)
+        
+        # GETSET
+        print(f"  GETSET '{test_key}' '{new_value}'...")
+        try:
+            result = write_node.getset(test_key, new_value)
+            if result != initial_value:
+                print(f"\033[31m  FAILED: Expected '{initial_value}', got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: GETSET failed - {e}")
+            return False
+        
+        # Verify all nodes have new value
+        print("  Verifying all nodes...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                value = node.conn.get(test_key)
+                if value != new_value:
+                    print(f"    Node {i}: FAILED (expected '{new_value}', got '{value}')")
+                    return False
+                print(f"    Node {i}: OK")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
+    def test_getset_wrong_args(self) -> bool:
+        """Test GETSET with wrong number of arguments."""
+        print("\nTest: GETSET wrong arguments")
+        
+        write_node = self._get_random_node()
+        
+        # Too few arguments
+        print("  Testing with too few arguments...")
+        try:
+            write_node.execute_command("GETSET", "key1")
+            print("  FAILED: Expected error for too few arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"\033[31m  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        # Too many arguments
+        print("  Testing with too many arguments...")
+        try:
+            write_node.execute_command("GETSET", "key1", "value1", "extra")
+            print("  FAILED: Expected error for too many arguments")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e).lower()
+            if "wrong number" not in error_msg:
+                print(f"\033[31m  FAILED: Expected 'wrong number' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+        
+        print("\033[32m  PASSED\033[0m")
+        return True
+    
     def test_chaos_set_get(self) -> bool:
         """Test SET/GET operations with one random node killed, then verify recovery."""
         print("\nTest: Chaos - SET/GET with one node down + recovery verification")
@@ -4931,6 +5154,12 @@ class TestClusterString(TestClusterBase):
             self.test_setnx_replication,
             self.test_setnx_wrong_type,
             self.test_setnx_wrong_args,
+            self.test_getset_existing_key,
+            self.test_getset_nonexistent_key,
+            self.test_getset_discards_ttl,
+            self.test_getset_wrong_type,
+            self.test_getset_replication,
+            self.test_getset_wrong_args,
             self.test_del_single_key,
             self.test_del_multiple_keys,
             self.test_del_nonexistent_key,

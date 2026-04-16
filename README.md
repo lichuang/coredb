@@ -129,7 +129,7 @@ print(r.get('key'))
 | `DECRBY key decrement` | Decrement key by value | ✅ |
 | `APPEND key value` | Append value to key | ✅ |
 | `STRLEN key` | Get string length | ✅ |
-| `GETSET key value` | Get old value and set new value | ❌ |
+| `GETSET key value` | Get old value and set new value | ✅ |
 | `SETEX key seconds value` | Set with expiration (seconds) | ✅ |
 | `PSETEX key milliseconds value` | Set with expiration (ms) | ✅ |
 | `SETNX key value` | Set if key not exists | ✅ |

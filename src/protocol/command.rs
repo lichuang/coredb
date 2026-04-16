@@ -14,8 +14,8 @@ use crate::protocol::list::{
 use crate::protocol::resp::Value;
 use crate::protocol::set::{SAddCommand, SIsMemberCommand, SMembersCommand, SRemCommand};
 use crate::protocol::string::{
-  AppendCommand, DecrCommand, DecrbyCommand, GetCommand, IncrCommand, IncrbyCommand, MgetCommand,
-  MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
+  AppendCommand, DecrCommand, DecrbyCommand, GetCommand, GetSetCommand, IncrCommand, IncrbyCommand,
+  MgetCommand, MsetCommand, PsetexCommand, SetCommand, SetexCommand, SetnxCommand, StrlenCommand,
 };
 use crate::protocol::zset::{ZAddCommand, ZRangeCommand, ZRemCommand, ZRevRangeCommand};
 use crate::server::Server;
@@ -64,6 +64,7 @@ impl CommandFactory {
     factory.register("EXISTS", ExistsCommand);
     factory.register("EXPIRE", ExpireCommand);
     factory.register("GET", GetCommand);
+    factory.register("GETSET", GetSetCommand);
     factory.register("INCR", IncrCommand);
     factory.register("INCRBY", IncrbyCommand);
     factory.register("MGET", MgetCommand);

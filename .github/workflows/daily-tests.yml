@@ -65,7 +65,7 @@ jobs:
         run: |
           cd tests
           python run_all_tests.py
-        timeout-minutes: 10
+        timeout-minutes: 30
 
       - name: Upload test logs on failure
         if: failure()

@@ -5,6 +5,7 @@
 pub mod del;
 pub mod exists;
 pub mod expire;
+pub mod keys;
 pub mod persist;
 pub mod pexpire;
 pub mod pttl;
@@ -14,6 +15,7 @@ pub mod type_;
 pub use del::DelCommand;
 pub use exists::ExistsCommand;
 pub use expire::ExpireCommand;
+pub use keys::KeysCommand;
 pub use persist::PersistCommand;
 pub use pexpire::PexpireCommand;
 pub use pttl::PttlCommand;

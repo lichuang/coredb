@@ -197,7 +197,7 @@ print(r.get('key'))
 | `PTTL key` | Get remaining TTL in ms | ✅ |
 | `PERSIST key` | Remove expiration | ✅ |
 | `KEYS pattern` | Find keys matching pattern | ✅ |
-| `RENAME key newkey` | Rename key | ❌ |
+| `RENAME key newkey` | Rename key | ✅ |
 | `RENAMENX key newkey` | Rename if newkey not exists | ❌ |
 | `TYPE key` | Get value type | ✅ |
 | `UNLINK key [key ...]` | Delete key(s) asynchronously | ❌ |

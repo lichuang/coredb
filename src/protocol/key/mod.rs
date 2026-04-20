@@ -9,6 +9,7 @@ pub mod keys;
 pub mod persist;
 pub mod pexpire;
 pub mod pttl;
+pub mod rename;
 pub mod ttl;
 pub mod type_;
 
@@ -19,5 +20,6 @@ pub use keys::KeysCommand;
 pub use persist::PersistCommand;
 pub use pexpire::PexpireCommand;
 pub use pttl::PttlCommand;
+pub use rename::RenameCommand;
 pub use ttl::TtlCommand;
 pub use type_::TypeCommand;

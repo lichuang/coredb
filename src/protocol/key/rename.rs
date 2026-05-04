@@ -52,7 +52,7 @@ impl RenameParams {
 
 /// Build the hex-encoded prefix for scanning sub-keys of a complex type
 /// Format: hex(key_len(4 bytes, BE) | key | version(8 bytes, BE))
-fn build_prefix_hex(key: &[u8], version: u64) -> String {
+pub fn build_prefix_hex(key: &[u8], version: u64) -> String {
   let key_len = key.len() as u32;
   let mut prefix = Vec::with_capacity(4 + key.len() + 8);
   prefix.extend_from_slice(&key_len.to_be_bytes());
@@ -63,7 +63,11 @@ fn build_prefix_hex(key: &[u8], version: u64) -> String {
 
 /// Delete all sub-keys and the metadata key for a complex type at `key`.
 /// Used to clean up the destination before overwriting.
-async fn delete_complex_key(server: &Server, key: &str, version: u64) -> Result<(), CoreDbError> {
+pub async fn delete_complex_key(
+  server: &Server,
+  key: &str,
+  version: u64,
+) -> Result<(), CoreDbError> {
   let prefix = build_prefix_hex(key.as_bytes(), version);
   let scan_results = server.scan_prefix(prefix.as_bytes()).await?;
   for (sub_key, _) in scan_results {
@@ -134,6 +138,7 @@ impl Command for RenameCommand {
           hm.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -153,6 +158,7 @@ impl Command for RenameCommand {
           lm.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -172,6 +178,7 @@ impl Command for RenameCommand {
           sm.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -191,6 +198,7 @@ impl Command for RenameCommand {
           zm.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -210,6 +218,7 @@ impl Command for RenameCommand {
           bm.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -245,6 +254,7 @@ impl Command for RenameCommand {
           bf.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -264,6 +274,7 @@ impl Command for RenameCommand {
           hll.version,
           &raw_value,
           now,
+          Value::SimpleString("OK".to_string()),
         )
         .await;
       }
@@ -281,7 +292,7 @@ impl Command for RenameCommand {
 }
 
 /// If the destination key exists and is a complex type, delete its sub-keys.
-async fn delete_dest_if_complex(
+pub async fn delete_dest_if_complex(
   server: &Server,
   dest_key: &str,
   dest_raw: &[u8],
@@ -343,13 +354,14 @@ async fn delete_dest_if_complex(
 
 /// Rename a complex type: scan source sub-keys, recreate at destination with same version,
 /// delete source sub-keys, write destination metadata, delete source metadata.
-async fn rename_complex_type(
+pub async fn rename_complex_type(
   server: &Server,
   src_key: &str,
   dst_key: &str,
   src_version: u64,
   src_metadata_raw: &[u8],
   now: u64,
+  success_value: Value,
 ) -> Result<Value, CoreDbError> {
   // 1. If destination already exists, clean it up first
   if let Some(dest_raw) = server.get(dst_key).await? {
@@ -405,11 +417,11 @@ async fn rename_complex_type(
   // 5. Atomic batch write
   server.batch_write(entries).await?;
 
-  Ok(Value::SimpleString("OK".to_string()))
+  Ok(success_value)
 }
 
 /// Build a sub-key binary: key_len(4 BE) | new_key | version(8 BE) | trailing
-fn build_sub_key_with_new_key(new_key: &[u8], version: u64, trailing: &[u8]) -> Vec<u8> {
+pub fn build_sub_key_with_new_key(new_key: &[u8], version: u64, trailing: &[u8]) -> Vec<u8> {
   let key_len = new_key.len() as u32;
   let mut buf = Vec::with_capacity(4 + new_key.len() + 8 + trailing.len());
   buf.extend_from_slice(&key_len.to_be_bytes());

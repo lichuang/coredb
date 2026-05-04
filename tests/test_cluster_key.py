@@ -542,6 +542,299 @@ class TestClusterKey(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    # --- RENAMENX tests ---
+
+    def test_renamenx_string_key(self) -> bool:
+        """Test RENAMENX on a string key renames when dest doesn't exist."""
+        print("\nTest: RENAMENX string key")
+
+        prefix = "renamenx_test_str"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.set(f"{prefix}:old", "hello")
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        val = node.get(f"{prefix}:new")
+        old_val = node.get(f"{prefix}:old")
+
+        if val != "hello":
+            print(f"  FAILED: expected 'hello', got {val}")
+            return False
+        if old_val is not None:
+            print(f"  FAILED: old key should be None, got {old_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_dest_exists(self) -> bool:
+        """Test RENAMENX returns 0 when destination already exists."""
+        print("\nTest: RENAMENX destination exists")
+
+        prefix = "renamenx_test_exist"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.set(f"{prefix}:src", "source_value")
+        node.set(f"{prefix}:dst", "dest_value")
+
+        result = node.renamenx(f"{prefix}:src", f"{prefix}:dst")
+
+        if result != 0:
+            print(f"  FAILED: expected 0, got {result}")
+            return False
+
+        # Verify nothing changed
+        src_val = node.get(f"{prefix}:src")
+        dst_val = node.get(f"{prefix}:dst")
+
+        if src_val != "source_value":
+            print(f"  FAILED: src should still be 'source_value', got {src_val}")
+            return False
+        if dst_val != "dest_value":
+            print(f"  FAILED: dst should still be 'dest_value', got {dst_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_nonexistent_key(self) -> bool:
+        """Test RENAMENX on a nonexistent key returns error."""
+        print("\nTest: RENAMENX nonexistent key")
+
+        prefix = "renamenx_test_ne"
+        node = self._get_random_node()
+
+        try:
+            node.renamenx(f"{prefix}:nonexistent", f"{prefix}:dest")
+            print("  FAILED: expected error for nonexistent key")
+            return False
+        except redis.ResponseError:
+            pass
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_same_key(self) -> bool:
+        """Test RENAMENX with same source and destination returns 0."""
+        print("\nTest: RENAMENX same key")
+
+        prefix = "renamenx_test_same"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.set(f"{prefix}:key", "value")
+        result = node.renamenx(f"{prefix}:key", f"{prefix}:key")
+
+        if result != 0:
+            print(f"  FAILED: expected 0, got {result}")
+            return False
+
+        # Verify key still exists
+        val = node.get(f"{prefix}:key")
+        if val != "value":
+            print(f"  FAILED: expected 'value', got {val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_hash_key(self) -> bool:
+        """Test RENAMENX on a hash key preserves all fields."""
+        print("\nTest: RENAMENX hash key")
+
+        prefix = "renamenx_test_hash"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.hset(f"{prefix}:old", mapping={"f1": "v1", "f2": "v2", "f3": "v3"})
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        new_val = node.hgetall(f"{prefix}:new")
+        old_val = node.hgetall(f"{prefix}:old")
+
+        if new_val != {"f1": "v1", "f2": "v2", "f3": "v3"}:
+            print(f"  FAILED: expected {{'f1':'v1','f2':'v2','f3':'v3'}}, got {new_val}")
+            return False
+        if old_val != {}:
+            print(f"  FAILED: old key should be empty, got {old_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_list_key(self) -> bool:
+        """Test RENAMENX on a list key preserves all elements."""
+        print("\nTest: RENAMENX list key")
+
+        prefix = "renamenx_test_list"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.rpush(f"{prefix}:old", "a", "b", "c")
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        new_val = node.lrange(f"{prefix}:new", 0, -1)
+        old_val = node.lrange(f"{prefix}:old", 0, -1)
+
+        if new_val != ["a", "b", "c"]:
+            print(f"  FAILED: expected ['a','b','c'], got {new_val}")
+            return False
+        if old_val != []:
+            print(f"  FAILED: old key should be empty, got {old_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_set_key(self) -> bool:
+        """Test RENAMENX on a set key preserves all members."""
+        print("\nTest: RENAMENX set key")
+
+        prefix = "renamenx_test_set"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.sadd(f"{prefix}:old", "m1", "m2", "m3")
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        new_val = node.smembers(f"{prefix}:new")
+        old_val = node.smembers(f"{prefix}:old")
+
+        if new_val != {"m1", "m2", "m3"}:
+            print(f"  FAILED: expected {{'m1','m2','m3'}}, got {new_val}")
+            return False
+        if old_val != set():
+            print(f"  FAILED: old key should be empty, got {old_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_zset_key(self) -> bool:
+        """Test RENAMENX on a sorted set key preserves all members and scores."""
+        print("\nTest: RENAMENX sorted set key")
+
+        prefix = "renamenx_test_zset"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.zadd(f"{prefix}:old", {"a": 1.0, "b": 2.0, "c": 3.0})
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        new_val = node.zrange(f"{prefix}:new", 0, -1, withscores=True)
+        old_val = node.zrange(f"{prefix}:old", 0, -1, withscores=True)
+
+        expected = [("a", 1.0), ("b", 2.0), ("c", 3.0)]
+        if new_val != expected:
+            print(f"  FAILED: expected {expected}, got {new_val}")
+            return False
+        if old_val != []:
+            print(f"  FAILED: old key should be empty, got {old_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_bitmap_key(self) -> bool:
+        """Test RENAMENX on a bitmap key preserves all bits."""
+        print("\nTest: RENAMENX bitmap key")
+
+        prefix = "renamenx_test_bmp"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.setbit(f"{prefix}:old", 0, 1)
+        node.setbit(f"{prefix}:old", 7, 1)
+        node.setbit(f"{prefix}:old", 100, 1)
+        node.setbit(f"{prefix}:old", 8192, 1)
+
+        result = node.renamenx(f"{prefix}:old", f"{prefix}:new")
+
+        if result != 1:
+            print(f"  FAILED: expected 1, got {result}")
+            return False
+
+        if node.getbit(f"{prefix}:new", 0) != 1:
+            print("  FAILED: bit 0 should be 1")
+            return False
+        if node.getbit(f"{prefix}:new", 7) != 1:
+            print("  FAILED: bit 7 should be 1")
+            return False
+        if node.getbit(f"{prefix}:new", 100) != 1:
+            print("  FAILED: bit 100 should be 1")
+            return False
+        if node.getbit(f"{prefix}:new", 8192) != 1:
+            print("  FAILED: bit 8192 should be 1")
+            return False
+        if node.getbit(f"{prefix}:old", 0) != 0:
+            print("  FAILED: old key should be gone")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_renamenx_hash_dest_exists(self) -> bool:
+        """Test RENAMENX returns 0 when dest is a different type."""
+        print("\nTest: RENAMENX hash dest exists")
+
+        prefix = "renamenx_test_hde"
+        node = self._get_random_node()
+        self._cleanup_test_keys(prefix)
+
+        node.hset(f"{prefix}:src", mapping={"field": "value"})
+        node.set(f"{prefix}:dst", "string_value")
+
+        result = node.renamenx(f"{prefix}:src", f"{prefix}:dst")
+
+        if result != 0:
+            print(f"  FAILED: expected 0, got {result}")
+            return False
+
+        # Verify nothing changed
+        src_val = node.hgetall(f"{prefix}:src")
+        dst_val = node.get(f"{prefix}:dst")
+
+        if src_val != {"field": "value"}:
+            print(f"  FAILED: src should still have hash data, got {src_val}")
+            return False
+        if dst_val != "string_value":
+            print(f"  FAILED: dst should still be 'string_value', got {dst_val}")
+            return False
+
+        self._cleanup_test_keys(prefix)
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all key command tests."""
         print("\n" + "=" * 50)
@@ -572,6 +865,16 @@ class TestClusterKey(TestClusterBase):
             self.test_rename_bitmap_overwrites_string,
             self.test_rename_hash_overwrites_string,
             self.test_rename_wrong_args,
+            self.test_renamenx_string_key,
+            self.test_renamenx_dest_exists,
+            self.test_renamenx_nonexistent_key,
+            self.test_renamenx_same_key,
+            self.test_renamenx_hash_key,
+            self.test_renamenx_list_key,
+            self.test_renamenx_set_key,
+            self.test_renamenx_zset_key,
+            self.test_renamenx_bitmap_key,
+            self.test_renamenx_hash_dest_exists,
         ]
 
         passed = 0

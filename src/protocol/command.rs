@@ -7,7 +7,7 @@ use crate::protocol::hash::{
 };
 use crate::protocol::key::{
   DelCommand, ExistsCommand, ExpireCommand, KeysCommand, PersistCommand, PexpireCommand,
-  PttlCommand, RenameCommand, TtlCommand, TypeCommand,
+  PttlCommand, RenameCommand, RenameNxCommand, TtlCommand, TypeCommand,
 };
 use crate::protocol::list::{
   LLenCommand, LPopCommand, LPushCommand, LRangeCommand, RPopCommand, RPushCommand,
@@ -76,6 +76,7 @@ impl CommandFactory {
     factory.register("PSETEX", PsetexCommand);
     factory.register("PTTL", PttlCommand);
     factory.register("RENAME", RenameCommand);
+    factory.register("RENAMENX", RenameNxCommand);
     factory.register("SET", SetCommand);
     factory.register("SETEX", SetexCommand);
     factory.register("SETNX", SetnxCommand);

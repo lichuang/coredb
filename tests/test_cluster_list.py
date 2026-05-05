@@ -984,6 +984,294 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_lindex_basic(self) -> bool:
+        """Test LINDEX with positive and negative indices."""
+        print("\nTest: LINDEX basic positive and negative indices")
+
+        key = "lindex_basic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c", "d", "e")
+
+        # Positive indices
+        try:
+            result = write_node.lindex(key, 0)
+            if result != "a":
+                print(f"\033[31m  FAILED: LINDEX 0 expected 'a', got {result}")
+                return False
+            print("  LINDEX 0 = 'a': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, 2)
+            if result != "c":
+                print(f"\033[31m  FAILED: LINDEX 2 expected 'c', got {result}")
+                return False
+            print("  LINDEX 2 = 'c': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, 4)
+            if result != "e":
+                print(f"\033[31m  FAILED: LINDEX 4 expected 'e', got {result}")
+                return False
+            print("  LINDEX 4 = 'e': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        # Negative indices
+        try:
+            result = write_node.lindex(key, -1)
+            if result != "e":
+                print(f"\033[31m  FAILED: LINDEX -1 expected 'e', got {result}")
+                return False
+            print("  LINDEX -1 = 'e': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, -3)
+            if result != "c":
+                print(f"\033[31m  FAILED: LINDEX -3 expected 'c', got {result}")
+                return False
+            print("  LINDEX -3 = 'c': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, -5)
+            if result != "a":
+                print(f"\033[31m  FAILED: LINDEX -5 expected 'a', got {result}")
+                return False
+            print("  LINDEX -5 = 'a': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_out_of_range(self) -> bool:
+        """Test LINDEX with out-of-range indices returns None."""
+        print("\nTest: LINDEX out-of-range indices")
+
+        key = "lindex_oor"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        # Positive out of range
+        try:
+            result = write_node.lindex(key, 3)
+            if result is not None:
+                print(f"\033[31m  FAILED: LINDEX 3 expected None, got {result}")
+                return False
+            print("  LINDEX 3 (out of range) = None: OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, 100)
+            if result is not None:
+                print(f"\033[31m  FAILED: LINDEX 100 expected None, got {result}")
+                return False
+            print("  LINDEX 100 (out of range) = None: OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        # Negative out of range
+        try:
+            result = write_node.lindex(key, -4)
+            if result is not None:
+                print(f"\033[31m  FAILED: LINDEX -4 expected None, got {result}")
+                return False
+            print("  LINDEX -4 (out of range) = None: OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, -100)
+            if result is not None:
+                print(f"\033[31m  FAILED: LINDEX -100 expected None, got {result}")
+                return False
+            print("  LINDEX -100 (out of range) = None: OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_nonexistent_key(self) -> bool:
+        """Test LINDEX on a non-existent key returns None."""
+        print("\nTest: LINDEX non-existent key")
+
+        key = "lindex_nonexistent"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        try:
+            result = write_node.lindex(key, 0)
+            if result is not None:
+                print(f"\033[31m  FAILED: Expected None, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        print("  LINDEX on non-existent key = None: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_wrong_type(self) -> bool:
+        """Test LINDEX on a key holding wrong type returns WRONGTYPE error."""
+        print("\nTest: LINDEX wrong type error")
+
+        key = "lindex_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  LINDEX on string key '{key}'...")
+        try:
+            write_node.lindex(key, 0)
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_after_lpush(self) -> bool:
+        """Test LINDEX on list created with LPUSH returns correct elements."""
+        print("\nTest: LINDEX after LPUSH")
+
+        key = "lindex_lpush"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        # LPUSH c b a => [a, b, c]
+        write_node.lpush(key, "c", "b", "a")
+
+        try:
+            result = write_node.lindex(key, 0)
+            if result != "a":
+                print(f"\033[31m  FAILED: LINDEX 0 expected 'a', got {result}")
+                return False
+            print("  LINDEX 0 = 'a': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, 2)
+            if result != "c":
+                print(f"\033[31m  FAILED: LINDEX 2 expected 'c', got {result}")
+                return False
+            print("  LINDEX 2 = 'c': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, -1)
+            if result != "c":
+                print(f"\033[31m  FAILED: LINDEX -1 expected 'c', got {result}")
+                return False
+            print("  LINDEX -1 = 'c': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_single_element(self) -> bool:
+        """Test LINDEX on a single-element list."""
+        print("\nTest: LINDEX single element")
+
+        key = "lindex_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "only")
+
+        try:
+            result = write_node.lindex(key, 0)
+            if result != "only":
+                print(f"\033[31m  FAILED: LINDEX 0 expected 'only', got {result}")
+                return False
+            print("  LINDEX 0 = 'only': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, -1)
+            if result != "only":
+                print(f"\033[31m  FAILED: LINDEX -1 expected 'only', got {result}")
+                return False
+            print("  LINDEX -1 = 'only': OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        try:
+            result = write_node.lindex(key, 1)
+            if result is not None:
+                print(f"\033[31m  FAILED: LINDEX 1 expected None, got {result}")
+                return False
+            print("  LINDEX 1 = None: OK")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LINDEX failed - {e}")
+            return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lindex_replication(self) -> bool:
+        """Test that LINDEX reads replicated data from all nodes."""
+        print("\nTest: LINDEX replication across nodes")
+
+        key = "lindex_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "x", "y", "z")
+
+        print("  LINDEX from all nodes to verify replication...")
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.lindex(key, 1)
+                if result != "y":
+                    print(f"    Node {i}: FAILED (expected 'y', got {result})")
+                    return False
+                print(f"    Node {i}: OK (got 'y')")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all list tests."""
         print("\n" + "=" * 50)
@@ -1020,6 +1308,13 @@ class TestClusterList(TestClusterBase):
             self.test_lrange_out_of_range,
             self.test_lrange_wrong_type,
             self.test_lrange_after_lpush,
+            self.test_lindex_basic,
+            self.test_lindex_out_of_range,
+            self.test_lindex_nonexistent_key,
+            self.test_lindex_wrong_type,
+            self.test_lindex_after_lpush,
+            self.test_lindex_single_element,
+            self.test_lindex_replication,
         ]
 
         passed = 0

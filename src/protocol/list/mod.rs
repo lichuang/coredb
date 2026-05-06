@@ -8,6 +8,7 @@ pub mod llen;
 pub mod lpop;
 pub mod lpush;
 pub mod lrange;
+pub mod lset;
 pub mod rpop;
 pub mod rpush;
 
@@ -16,5 +17,6 @@ pub use llen::LLenCommand;
 pub use lpop::LPopCommand;
 pub use lpush::LPushCommand;
 pub use lrange::LRangeCommand;
+pub use lset::LSetCommand;
 pub use rpop::RPopCommand;
 pub use rpush::RPushCommand;

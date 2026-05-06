@@ -215,7 +215,7 @@ print(r.get('key'))
 | `LLEN key` | Get list length | ✅ |
 | `LRANGE key start stop` | Get range of elements | ✅ |
 | `LINDEX key index` | Get element at index | ✅ |
-| `LSET key index value` | Set element at index | ❌ |
+| `LSET key index value` | Set element at index | ✅ |
 | `LREM key count value` | Remove elements | ❌ |
 | `LTRIM key start stop` | Trim list | ❌ |
 

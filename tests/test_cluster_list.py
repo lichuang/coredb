@@ -984,6 +984,177 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_lset_basic(self) -> bool:
+        """Test LSET with positive index."""
+        print("\nTest: LSET basic positive index")
+
+        key = "lset_basic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        print(f"  LSET '{key}' 0 'four'...")
+        try:
+            result = write_node.lset(key, 0, "four")
+            if result is not True:
+                print(f"\033[31m  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LSET failed - {e}")
+            return False
+
+        print("  LSET returned OK: True")
+        result = write_node.lrange(key, 0, -1)
+        if result != ["four", "b", "c"]:
+            print(f"\033[31m  FAILED: Expected ['four','b','c'], got {result}")
+            return False
+        print("  LRANGE = ['four','b','c']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lset_negative_index(self) -> bool:
+        """Test LSET with negative index."""
+        print("\nTest: LSET negative index")
+
+        key = "lset_negative"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        print(f"  LSET '{key}' -1 'five'...")
+        try:
+            result = write_node.lset(key, -1, "five")
+            if result is not True:
+                print(f"\033[31m  FAILED: Expected True, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LSET failed - {e}")
+            return False
+
+        print("  LSET returned OK: True")
+        result = write_node.lrange(key, 0, -1)
+        if result != ["a", "b", "five"]:
+            print(f"\033[31m  FAILED: Expected ['a','b','five'], got {result}")
+            return False
+        print("  LRANGE = ['a','b','five']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lset_middle(self) -> bool:
+        """Test LSET on middle element."""
+        print("\nTest: LSET middle element")
+
+        key = "lset_middle"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c", "d", "e")
+
+        print(f"  LSET '{key}' 2 'X'...")
+        try:
+            write_node.lset(key, 2, "X")
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LSET failed - {e}")
+            return False
+
+        result = write_node.lindex(key, 2)
+        if result != "X":
+            print(f"\033[31m  FAILED: LINDEX 2 expected 'X', got {result}")
+            return False
+        print("  LINDEX 2 = 'X': OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lset_nonexistent_key(self) -> bool:
+        """Test LSET on a non-existent key returns error."""
+        print("\nTest: LSET non-existent key")
+
+        key = "lset_nonexistent"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  LSET '{key}' 0 'value' on non-existent key...")
+        try:
+            write_node.lset(key, 0, "value")
+            print(f"\033[31m  FAILED: Expected error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "no such key" not in error_msg:
+                print(f"\033[31m  FAILED: Expected 'no such key' error, got: {e}")
+                return False
+            print(f"  Got expected error: {e}")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lset_out_of_range(self) -> bool:
+        """Test LSET with out-of-range index returns error."""
+        print("\nTest: LSET out-of-range index")
+
+        key = "lset_oor"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        # Positive out of range
+        print(f"  LSET '{key}' 5 'x' (positive out of range)...")
+        try:
+            write_node.lset(key, 5, "x")
+            print(f"\033[31m  FAILED: Expected error for index 5")
+            return False
+        except redis.ResponseError as e:
+            if "index out of range" not in str(e):
+                print(f"\033[31m  FAILED: Expected 'index out of range', got: {e}")
+                return False
+            print(f"  Got expected error: OK")
+
+        # Negative out of range
+        print(f"  LSET '{key}' -4 'x' (negative out of range)...")
+        try:
+            write_node.lset(key, -4, "x")
+            print(f"\033[31m  FAILED: Expected error for index -4")
+            return False
+        except redis.ResponseError as e:
+            if "index out of range" not in str(e):
+                print(f"\033[31m  FAILED: Expected 'index out of range', got: {e}")
+                return False
+            print(f"  Got expected error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lset_wrong_type(self) -> bool:
+        """Test LSET on a key holding wrong type returns WRONGTYPE error."""
+        print("\nTest: LSET wrong type error")
+
+        key = "lset_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  LSET on string key '{key}'...")
+        try:
+            write_node.lset(key, 0, "element")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_lindex_basic(self) -> bool:
         """Test LINDEX with positive and negative indices."""
         print("\nTest: LINDEX basic positive and negative indices")
@@ -1308,6 +1479,12 @@ class TestClusterList(TestClusterBase):
             self.test_lrange_out_of_range,
             self.test_lrange_wrong_type,
             self.test_lrange_after_lpush,
+            self.test_lset_basic,
+            self.test_lset_negative_index,
+            self.test_lset_middle,
+            self.test_lset_nonexistent_key,
+            self.test_lset_out_of_range,
+            self.test_lset_wrong_type,
             self.test_lindex_basic,
             self.test_lindex_out_of_range,
             self.test_lindex_nonexistent_key,

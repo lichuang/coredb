@@ -10,7 +10,8 @@ use crate::protocol::key::{
   PttlCommand, RenameCommand, RenameNxCommand, TtlCommand, TypeCommand,
 };
 use crate::protocol::list::{
-  LIndexCommand, LLenCommand, LPopCommand, LPushCommand, LRangeCommand, RPopCommand, RPushCommand,
+  LIndexCommand, LLenCommand, LPopCommand, LPushCommand, LRangeCommand, LSetCommand, RPopCommand,
+  RPushCommand,
 };
 use crate::protocol::resp::Value;
 use crate::protocol::set::{SAddCommand, SIsMemberCommand, SMembersCommand, SRemCommand};
@@ -103,6 +104,7 @@ impl CommandFactory {
     factory.register("LRANGE", LRangeCommand);
     factory.register("LPOP", LPopCommand);
     factory.register("LPUSH", LPushCommand);
+    factory.register("LSET", LSetCommand);
     factory.register("RPOP", RPopCommand);
     factory.register("RPUSH", RPushCommand);
 

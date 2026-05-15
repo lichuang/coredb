@@ -1443,6 +1443,343 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_lrem_basic_positive_count(self) -> bool:
+        """Test LREM with positive count removes from head to tail."""
+        print("\nTest: LREM basic positive count")
+
+        key = "lrem_positive"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "hello", "foo", "hello", "hello")
+
+        print(f"  LREM '{key}' 2 'hello'...")
+        try:
+            result = write_node.lrem(key, 2, "hello")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 2: OK")
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["foo", "hello"]:
+            print(f"\033[31m  FAILED: Expected ['foo','hello'], got {remaining}")
+            return False
+        print(f"  Remaining = ['foo','hello']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_negative_count(self) -> bool:
+        """Test LREM with negative count removes from tail to head."""
+        print("\nTest: LREM negative count (tail to head)")
+
+        key = "lrem_negative"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "hello", "hello", "foo", "hello")
+
+        print(f"  LREM '{key}' -2 'hello'...")
+        try:
+            result = write_node.lrem(key, -2, "hello")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 2: OK")
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["hello", "foo"]:
+            print(f"\033[31m  FAILED: Expected ['hello','foo'], got {remaining}")
+            return False
+        print(f"  Remaining = ['hello','foo']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_zero_count(self) -> bool:
+        """Test LREM with count=0 removes all occurrences."""
+        print("\nTest: LREM count=0 removes all occurrences")
+
+        key = "lrem_zero"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "a", "c", "a")
+
+        print(f"  LREM '{key}' 0 'a'...")
+        try:
+            result = write_node.lrem(key, 0, "a")
+            if result != 3:
+                print(f"\033[31m  FAILED: Expected 3, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 3: OK")
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["b", "c"]:
+            print(f"\033[31m  FAILED: Expected ['b','c'], got {remaining}")
+            return False
+        print(f"  Remaining = ['b','c']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_nonexistent_key(self) -> bool:
+        """Test LREM on a non-existent key returns 0."""
+        print("\nTest: LREM non-existent key")
+
+        key = "lrem_nonexistent"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+
+        print(f"  LREM '{key}' 1 'hello' on non-existent key...")
+        try:
+            result = write_node.lrem(key, 1, "hello")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 0: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_no_match(self) -> bool:
+        """Test LREM with element not in the list returns 0."""
+        print("\nTest: LREM no matching element")
+
+        key = "lrem_no_match"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "c")
+
+        print(f"  LREM '{key}' 0 'x' (not in list)...")
+        try:
+            result = write_node.lrem(key, 0, "x")
+            if result != 0:
+                print(f"\033[31m  FAILED: Expected 0, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 0: OK")
+
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["a", "b", "c"]:
+            print(f"\033[31m  FAILED: List should be unchanged, got {remaining}")
+            return False
+        print("  List unchanged: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_removes_all_deletes_key(self) -> bool:
+        """Test LREM that removes all elements deletes the key."""
+        print("\nTest: LREM removes all elements deletes key")
+
+        key = "lrem_delete_key"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "hello", "hello")
+
+        print(f"  LREM '{key}' 0 'hello' (removes all)...")
+        try:
+            result = write_node.lrem(key, 0, "hello")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 2: OK")
+
+        # Key should no longer exist
+        exists = write_node.exists(key)
+        if exists != 0:
+            print(f"\033[31m  FAILED: Key should be deleted, exists={exists}")
+            return False
+        print("  Key deleted: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_count_exceeds_matches(self) -> bool:
+        """Test LREM where count exceeds the number of matching elements."""
+        print("\nTest: LREM count exceeds matches")
+
+        key = "lrem_count_exceeds"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "a")
+
+        print(f"  LREM '{key}' 10 'a' (count > occurrences)...")
+        try:
+            result = write_node.lrem(key, 10, "a")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 2 (removed all matches): OK")
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["b"]:
+            print(f"\033[31m  FAILED: Expected ['b'], got {remaining}")
+            return False
+        print("  Remaining = ['b']: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_wrong_type(self) -> bool:
+        """Test LREM on a key holding wrong type returns WRONGTYPE error."""
+        print("\nTest: LREM wrong type error")
+
+        key = "lrem_wrong_type"
+        write_node = self._get_random_node()
+
+        write_node.set(key, "string_value")
+
+        print(f"  LREM on string key '{key}'...")
+        try:
+            write_node.lrem(key, 1, "hello")
+            print(f"\033[31m  FAILED: Expected WRONGTYPE error")
+            return False
+        except redis.ResponseError as e:
+            error_msg = str(e)
+            if "WRONGTYPE" not in error_msg:
+                print(f"\033[31m  FAILED: Expected WRONGTYPE error, got: {e}")
+                return False
+            print(f"  Got expected WRONGTYPE error: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_single_element(self) -> bool:
+        """Test LREM on a single-element list."""
+        print("\nTest: LREM single element list")
+
+        key = "lrem_single"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "hello")
+
+        print(f"  LREM '{key}' 1 'hello'...")
+        try:
+            result = write_node.lrem(key, 1, "hello")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 1: OK")
+
+        exists = write_node.exists(key)
+        if exists != 0:
+            print(f"\033[31m  FAILED: Key should be deleted after last element removed")
+            return False
+        print("  Key deleted after last element: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_atomicity_batch_consistency(self) -> bool:
+        """Test that LREM is atomic — all removals and metadata update happen together."""
+        print("\nTest: LREM atomicity batch consistency")
+
+        key = "lrem_atomic"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "a", "b", "a", "c", "a")
+
+        print(f"  LREM '{key}' 2 'a' (removes 2 of 3 'a's)...")
+        try:
+            result = write_node.lrem(key, 2, "a")
+            if result != 2:
+                print(f"\033[31m  FAILED: Expected 2, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 2: OK")
+
+        # Verify list integrity: exactly ['b', 'c', 'a'] remains
+        remaining = write_node.lrange(key, 0, -1)
+        if remaining != ["b", "c", "a"]:
+            print(f"\033[31m  FAILED: Expected ['b','c','a'], got {remaining}")
+            return False
+
+        # Verify length is consistent
+        length = write_node.llen(key)
+        if length != 3:
+            print(f"\033[31m  FAILED: Expected LLEN=3, got {length}")
+            return False
+
+        print("  List consistent after atomic removal: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_lrem_replication(self) -> bool:
+        """Test that LREM operations replicate to all nodes."""
+        print("\nTest: LREM replication")
+
+        key = "lrem_repl"
+        write_node = self._get_random_node()
+
+        write_node.delete(key)
+        write_node.rpush(key, "x", "y", "x", "z")
+
+        print(f"  LREM '{key}' 1 'x' on random node...")
+        try:
+            result = write_node.lrem(key, 1, "x")
+            if result != 1:
+                print(f"\033[31m  FAILED: Expected 1, got {result}")
+                return False
+        except redis.RedisError as e:
+            print(f"\033[31m  FAILED: LREM failed - {e}")
+            return False
+
+        print("  LREM returned 1: OK")
+
+        expected = ["y", "x", "z"]
+        for i, node in enumerate(self.nodes, 1):
+            try:
+                result = node.conn.lrange(key, 0, -1)
+                if result != expected:
+                    print(f"    Node {i}: FAILED (expected {expected}, got {result})")
+                    return False
+                print(f"    Node {i}: OK (got {result})")
+            except redis.RedisError as e:
+                print(f"    Node {i}: FAILED - {e}")
+                return False
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def run_all_tests(self) -> bool:
         """Run all list tests."""
         print("\n" + "=" * 50)
@@ -1492,6 +1829,17 @@ class TestClusterList(TestClusterBase):
             self.test_lindex_after_lpush,
             self.test_lindex_single_element,
             self.test_lindex_replication,
+            self.test_lrem_basic_positive_count,
+            self.test_lrem_negative_count,
+            self.test_lrem_zero_count,
+            self.test_lrem_nonexistent_key,
+            self.test_lrem_no_match,
+            self.test_lrem_removes_all_deletes_key,
+            self.test_lrem_count_exceeds_matches,
+            self.test_lrem_wrong_type,
+            self.test_lrem_single_element,
+            self.test_lrem_atomicity_batch_consistency,
+            self.test_lrem_replication,
         ]
 
         passed = 0

@@ -153,9 +153,18 @@ impl Command for LRemCommand {
 
     let new_size = metadata.size - removed_count;
 
-    let mut entries: Vec<UpsertKV> = Vec::with_capacity(indices_to_remove.len() + 1);
+    let remove_set: std::collections::HashSet<u64> = indices_to_remove.into_iter().collect();
 
-    for physical in &indices_to_remove {
+    let mut remaining_data: Vec<Vec<u8>> = Vec::with_capacity(new_size as usize);
+    for (physical, data) in &all_elements {
+      if !remove_set.contains(physical) {
+        remaining_data.push(data.clone());
+      }
+    }
+
+    let mut entries: Vec<UpsertKV> = Vec::new();
+
+    for (physical, _) in &all_elements {
       let sub_key = ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, *physical);
       entries.push(UpsertKV::delete(sub_key));
     }
@@ -163,8 +172,17 @@ impl Command for LRemCommand {
     if new_size == 0 {
       entries.push(UpsertKV::delete(args.key.clone()));
     } else {
+      let new_head = metadata.head;
+      for (i, data) in remaining_data.iter().enumerate() {
+        let physical = new_head + i as u64;
+        let sub_key = ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, physical);
+        let elem = ListElementValue { data: data.clone() };
+        entries.push(UpsertKV::insert(sub_key, &elem.serialize()));
+      }
+
       let mut new_meta = metadata.clone();
       new_meta.size = new_size;
+      new_meta.tail = new_head + new_size;
       entries.push(UpsertKV::insert(args.key.clone(), &new_meta.serialize()));
     }
 

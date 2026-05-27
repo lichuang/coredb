@@ -3663,9 +3663,9 @@ class TestClusterString(TestClusterBase):
         
         write_node = self._get_random_node()
         
-        # Set with 500ms TTL
-        print(f"  SET '{test_key}' = '{initial_value}' with 500ms TTL...")
-        write_node.set(test_key, initial_value, px=500)
+        # Set with 5s TTL (generous for CI with Raft consensus delay)
+        print(f"  SET '{test_key}' = '{initial_value}' with 5s TTL...")
+        write_node.set(test_key, initial_value, px=5000)
         
         # GETSET should return old value and discard TTL
         print(f"  GETSET '{test_key}' '{new_value}'...")
@@ -3679,8 +3679,8 @@ class TestClusterString(TestClusterBase):
             return False
         
         # Wait for original TTL to pass
-        print("  Waiting 600ms (original TTL was 500ms)...")
-        time.sleep(0.6)
+        print("  Waiting 6s (original TTL was 5s)...")
+        time.sleep(6)
         
         # Key should still exist (TTL was discarded)
         value = write_node.get(test_key)

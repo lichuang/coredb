@@ -50,17 +50,16 @@ impl Command for SIsMemberCommand {
           }
           // Check if expired
           if meta.is_expired(now_ms()) {
-            return Ok(Value::Integer(0));
+            return Ok(Value::Boolean(false));
           }
           meta
         }
         Err(_) => {
-          return Ok(Value::Integer(0));
+          return Ok(Value::Boolean(false));
         }
       },
       None => {
-        // Key not found
-        return Ok(Value::Integer(0));
+        return Ok(Value::Boolean(false));
       }
     };
 
@@ -68,8 +67,8 @@ impl Command for SIsMemberCommand {
     let sub_key_str = SetMemberValue::build_sub_key_hex(key.as_bytes(), metadata.version, &member);
 
     Ok(match server.get(&sub_key_str).await? {
-      Some(_) => Value::Integer(1),
-      None => Value::Integer(0),
+      Some(_) => Value::Boolean(true),
+      None => Value::Boolean(false),
     })
   }
 }

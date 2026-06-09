@@ -35,19 +35,16 @@ impl Command for HGetAllCommand {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
-            // Expired, return empty array
-            return Ok(Value::Array(Some(vec![])));
+            return Ok(Value::Map(vec![]));
           }
           meta
         }
         Err(_) => {
-          // Corrupted metadata, return empty array
-          return Ok(Value::Array(Some(vec![])));
+          return Ok(Value::Map(vec![]));
         }
       },
       None => {
-        // Key not found, return empty array
-        return Ok(Value::Array(Some(vec![])));
+        return Ok(Value::Map(vec![]));
       }
     };
 
@@ -59,12 +56,10 @@ impl Command for HGetAllCommand {
     // Scan for all field-value pairs with this prefix
     let scan_results = server.scan_prefix(prefix_hex.as_bytes()).await?;
 
-    // Parse results and build response array
-    let mut result_array = Vec::with_capacity(scan_results.len() * 2);
+    // Parse results and build response as key-value pairs
+    let mut pairs = Vec::with_capacity(scan_results.len());
 
     for (sub_key_hex, sub_value) in scan_results {
-      // sub_key_hex is a hex-encoded string (valid UTF-8 bytes of hex chars)
-      // First decode the hex string to get the actual binary sub_key
       let sub_key = match String::from_utf8(sub_key_hex) {
         Ok(hex_str) => match hex::decode(&hex_str) {
           Ok(bytes) => bytes,
@@ -73,18 +68,17 @@ impl Command for HGetAllCommand {
         Err(_) => continue,
       };
 
-      // Parse the binary sub_key to extract the field name
-      if let Some((_, _, field)) = HashFieldValue::parse_sub_key(&sub_key) {
-        // Deserialize the field value
-        if let Ok(field_value) = HashFieldValue::deserialize(&sub_value) {
-          // Add field and value to result array
-          result_array.push(Value::BulkString(Some(field.to_vec())));
-          result_array.push(Value::BulkString(Some(field_value.data)));
-        }
+      if let Some((_, _, field)) = HashFieldValue::parse_sub_key(&sub_key)
+        && let Ok(field_value) = HashFieldValue::deserialize(&sub_value)
+      {
+        pairs.push((
+          Value::BulkString(Some(field.to_vec())),
+          Value::BulkString(Some(field_value.data)),
+        ));
       }
     }
 
-    Ok(Value::Array(Some(result_array)))
+    Ok(Value::Map(pairs))
   }
 }
 

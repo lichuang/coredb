@@ -87,7 +87,7 @@ impl Command for PexpireCommand {
     // Negative milliseconds: delete the key immediately
     if params.milliseconds < 0 {
       server.delete(&params.key).await?;
-      return Ok(Value::Integer(1));
+      return Ok(Value::Boolean(true));
     }
 
     // Read current key state
@@ -95,7 +95,7 @@ impl Command for PexpireCommand {
 
     // Key must exist (not expired or missing)
     let (current_expires_at, flags) = match key_state {
-      KeyState::NotFound | KeyState::Expired => return Ok(Value::Integer(0)),
+      KeyState::NotFound | KeyState::Expired => return Ok(Value::Boolean(false)),
       KeyState::String(sv) => (sv.expires_at, sv.flags),
       KeyState::Hash(hm) => (hm.expires_at, hm.flags),
     };
@@ -107,7 +107,7 @@ impl Command for PexpireCommand {
     // Zero milliseconds: delete the key immediately
     if params.milliseconds == 0 {
       server.delete(&params.key).await?;
-      return Ok(Value::Integer(1));
+      return Ok(Value::Boolean(true));
     }
 
     // Check expire condition
@@ -132,13 +132,13 @@ impl Command for PexpireCommand {
     };
 
     if !should_set {
-      return Ok(Value::Integer(0));
+      return Ok(Value::Boolean(false));
     }
 
     // Re-read and reconstruct the value with updated expiration
     let raw_value = match server.get(&params.key).await? {
       Some(v) => v,
-      None => return Ok(Value::Integer(0)), // Key disappeared between reads
+      None => return Ok(Value::Boolean(false)),
     };
 
     let data_type = flags & 0x0F;
@@ -156,9 +156,8 @@ impl Command for PexpireCommand {
       return Err(ProtocolError::Custom("ERR unsupported key type").into());
     };
 
-    // Write the updated value back
     server.set(params.key, new_value).await?;
-    Ok(Value::Integer(1))
+    Ok(Value::Boolean(true))
   }
 }
 

@@ -57,30 +57,24 @@ impl Command for PersistCommand {
     // Read raw value from store
     let raw_value = match server.get(&params.key).await? {
       Some(v) => v,
-      None => return Ok(Value::Integer(0)),
+      None => return Ok(Value::Boolean(false)),
     };
 
     let now = now_ms();
 
-    // Try to deserialize as each known metadata type and clear expiration.
-    // The macro tries each type, checks expiration, and if the key has an
-    // expiration set, clears it and writes back.
     macro_rules! try_persist {
       ($ty:ty) => {
         if let Ok(mut meta) = <$ty>::deserialize(&raw_value) {
-          // If expired, lazily delete and return 0
           if meta.is_expired(now) {
             let _ = server.delete(&params.key).await;
-            return Ok(Value::Integer(0));
+            return Ok(Value::Boolean(false));
           }
-          // If no expiration, return 0 (nothing to persist)
           if meta.expires_at == NO_EXPIRATION {
-            return Ok(Value::Integer(0));
+            return Ok(Value::Boolean(false));
           }
-          // Clear expiration and write back
           meta.expires_at = NO_EXPIRATION;
           server.set(params.key.clone(), meta.serialize()).await?;
-          return Ok(Value::Integer(1));
+          return Ok(Value::Boolean(true));
         }
       };
     }
@@ -95,8 +89,8 @@ impl Command for PersistCommand {
     try_persist!(HyperLogLogMetadata);
     try_persist!(JsonMetadata);
 
-    // Unknown type — key exists but we can't modify its expiration
-    Ok(Value::Integer(0))
+    // Unknown type
+    Ok(Value::Boolean(false))
   }
 }
 

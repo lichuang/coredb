@@ -46,16 +46,16 @@ impl Command for HExistsCommand {
         Ok(meta) => {
           // Check if expired
           if meta.is_expired(now_ms()) {
-            return Ok(Value::Integer(0)); // Return 0 if expired
+            return Ok(Value::Boolean(false));
           }
           meta
         }
         Err(_) => {
-          return Ok(Value::Integer(0)); // Return 0 if corrupted
+          return Ok(Value::Boolean(false));
         }
       },
       None => {
-        return Ok(Value::Integer(0)); // Return 0 if key not found
+        return Ok(Value::Boolean(false));
       }
     };
 
@@ -64,8 +64,8 @@ impl Command for HExistsCommand {
     let sub_key_str = HashFieldValue::build_sub_key_hex(key.as_bytes(), version, &field);
 
     match server.get(&sub_key_str).await? {
-      Some(_) => Ok(Value::Integer(1)), // Field exists
-      None => Ok(Value::Integer(0)),    // Field does not exist
+      Some(_) => Ok(Value::Boolean(true)),
+      None => Ok(Value::Boolean(false)),
     }
   }
 }

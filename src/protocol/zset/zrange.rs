@@ -172,17 +172,23 @@ impl Command for ZRangeCommand {
     let stop = stop as usize;
 
     // Build result array
-    let mut result = Vec::new();
-    for (member, score) in &members[start..=stop] {
-      result.push(Value::BulkString(Some(member.clone())));
-      if args.with_scores {
-        // Redis returns scores as bulk strings (formatted float)
+    if args.with_scores {
+      let mut pairs = Vec::new();
+      for (member, score) in &members[start..=stop] {
         let score_str = format_score(*score);
-        result.push(Value::BulkString(Some(score_str.into_bytes())));
+        pairs.push((
+          Value::BulkString(Some(member.clone())),
+          Value::BulkString(Some(score_str.into_bytes())),
+        ));
       }
+      Ok(Value::Pairs(pairs))
+    } else {
+      let mut result = Vec::new();
+      for (member, _) in &members[start..=stop] {
+        result.push(Value::BulkString(Some(member.clone())));
+      }
+      Ok(Value::Array(Some(result)))
     }
-
-    Ok(Value::Array(Some(result)))
   }
 }
 

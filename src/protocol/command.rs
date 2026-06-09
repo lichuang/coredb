@@ -130,30 +130,56 @@ impl CommandFactory {
   }
 
   /// Execute a RESP command on the given server.
-  /// This is the single unified error-to-RESP conversion point.
-  pub async fn execute(&self, value: Value, server: &Server) -> Value {
+  /// Returns (response_value, optional_new_proto).
+  /// The optional_new_proto is set by HELLO to switch the connection protocol.
+  pub async fn execute(&self, value: Value, server: &Server) -> (Value, Option<u8>) {
     match value {
       Value::Array(Some(items)) if !items.is_empty() => {
-        // Extract command name
         let cmd_name = match &items[0] {
           Value::BulkString(Some(data)) => String::from_utf8_lossy(data).to_uppercase(),
           Value::SimpleString(s) => s.to_uppercase(),
-          _ => return Value::error("invalid command format"),
+          _ => return (Value::error("invalid command format"), None),
         };
 
-        // Find and execute command
-        match self.commands.get(&cmd_name) {
-          Some(cmd) => match cmd.execute(&items, server).await {
-            Ok(v) => v,
-            Err(e) => {
-              warn!("Command '{}' error: {}", cmd_name, e);
-              e.into() // CoreDbError → Value::Error
-            }
-          },
-          None => Value::error(ProtocolError::UnknownCommand(cmd_name).to_string()),
-        }
+        let result = match self.commands.get(&cmd_name) {
+          Some(cmd) => cmd.execute(&items, server).await,
+          None => Err(ProtocolError::UnknownCommand(cmd_name.clone()).into()),
+        };
+
+        let value = match result {
+          Ok(v) => v,
+          Err(e) => {
+            warn!("Command '{}' error: {}", cmd_name, e);
+            e.into()
+          }
+        };
+
+        let new_proto = if cmd_name == "HELLO" && !value.is_error() {
+          Self::parse_hello_proto(&items)
+        } else {
+          None
+        };
+
+        (value, new_proto)
       }
-      _ => Value::error("ERR failed to parse command"),
+      _ => (Value::error("ERR failed to parse command"), None),
+    }
+  }
+
+  fn parse_hello_proto(items: &[Value]) -> Option<u8> {
+    if items.len() < 2 {
+      return None;
+    }
+    match &items[1] {
+      Value::BulkString(Some(data)) => {
+        let p = String::from_utf8_lossy(data).parse::<u8>().ok()?;
+        if p == 2 || p == 3 { Some(p) } else { None }
+      }
+      Value::Integer(i) => {
+        let p = *i as u8;
+        if p == 2 || p == 3 { Some(p) } else { None }
+      }
+      _ => None,
     }
   }
 }

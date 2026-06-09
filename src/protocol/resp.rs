@@ -1,37 +1,44 @@
 /// RESP (REdis Serialization Protocol) data types
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-  /// Simple strings, used for simple responses like "OK"
   SimpleString(String),
-  /// Errors
   Error(String),
-  /// Integers
   Integer(i64),
-  /// Bulk strings, used for binary-safe strings (can be null)
   BulkString(Option<Vec<u8>>),
-  /// Arrays of other values (can be null)
   Array(Option<Vec<Value>>),
+  /// Key-value mapping (RESP3: %N map, RESP2: flat array *2N)
+  Map(Vec<(Value, Value)>),
+  /// Ordered pairs, e.g. ZRANGE WITHSCORES (RESP3: array of 2-elem arrays, RESP2: flat array *2N)
+  Pairs(Vec<(Value, Value)>),
+  /// Boolean (RESP3: #t/#f, RESP2: :1/:0)
+  Boolean(bool),
 }
 
 impl Value {
-  /// Create a simple OK response
   pub fn ok() -> Self {
     Value::SimpleString("OK".to_string())
   }
 
-  /// Create an error response
   pub fn error(msg: impl Into<String>) -> Self {
     Value::Error(msg.into())
   }
 
-  /// Encode Value to RESP bytes
-  pub fn encode(&self) -> Vec<u8> {
+  pub fn is_error(&self) -> bool {
+    matches!(self, Value::Error(_))
+  }
+
+  pub fn encode_proto(&self, proto: u8) -> Vec<u8> {
     let mut buf = Vec::new();
-    self.encode_to(&mut buf);
+    self.encode_to(proto, &mut buf);
     buf
   }
 
-  fn encode_to(&self, buf: &mut Vec<u8>) {
+  #[allow(dead_code)]
+  pub fn encode(&self) -> Vec<u8> {
+    self.encode_proto(2)
+  }
+
+  fn encode_to(&self, proto: u8, buf: &mut Vec<u8>) {
     match self {
       Value::SimpleString(s) => {
         buf.push(b'+');
@@ -49,7 +56,11 @@ impl Value {
         buf.extend_from_slice(b"\r\n");
       }
       Value::BulkString(None) => {
-        buf.extend_from_slice(b"$-1\r\n");
+        if proto == 3 {
+          buf.extend_from_slice(b"_\r\n");
+        } else {
+          buf.extend_from_slice(b"$-1\r\n");
+        }
       }
       Value::BulkString(Some(data)) => {
         buf.push(b'$');
@@ -59,14 +70,60 @@ impl Value {
         buf.extend_from_slice(b"\r\n");
       }
       Value::Array(None) => {
-        buf.extend_from_slice(b"*-1\r\n");
+        if proto == 3 {
+          buf.extend_from_slice(b"_\r\n");
+        } else {
+          buf.extend_from_slice(b"*-1\r\n");
+        }
       }
       Value::Array(Some(items)) => {
         buf.push(b'*');
         buf.extend_from_slice(items.len().to_string().as_bytes());
         buf.extend_from_slice(b"\r\n");
         for item in items {
-          item.encode_to(buf);
+          item.encode_to(proto, buf);
+        }
+      }
+      Value::Map(pairs) => {
+        if proto == 3 {
+          buf.push(b'%');
+          buf.extend_from_slice(pairs.len().to_string().as_bytes());
+          buf.extend_from_slice(b"\r\n");
+        } else {
+          buf.push(b'*');
+          buf.extend_from_slice((pairs.len() * 2).to_string().as_bytes());
+          buf.extend_from_slice(b"\r\n");
+        }
+        for (k, v) in pairs {
+          k.encode_to(proto, buf);
+          v.encode_to(proto, buf);
+        }
+      }
+      Value::Pairs(pairs) => {
+        if proto == 3 {
+          buf.push(b'*');
+          buf.extend_from_slice(pairs.len().to_string().as_bytes());
+          buf.extend_from_slice(b"\r\n");
+          for (k, v) in pairs {
+            buf.extend_from_slice(b"*2\r\n");
+            k.encode_to(proto, buf);
+            v.encode_to(proto, buf);
+          }
+        } else {
+          buf.push(b'*');
+          buf.extend_from_slice((pairs.len() * 2).to_string().as_bytes());
+          buf.extend_from_slice(b"\r\n");
+          for (k, v) in pairs {
+            k.encode_to(proto, buf);
+            v.encode_to(proto, buf);
+          }
+        }
+      }
+      Value::Boolean(val) => {
+        if proto == 3 {
+          buf.extend_from_slice(if *val { b"#t\r\n" } else { b"#f\r\n" });
+        } else {
+          buf.extend_from_slice(if *val { b":1\r\n" } else { b":0\r\n" });
         }
       }
     }

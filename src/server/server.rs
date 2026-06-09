@@ -158,8 +158,8 @@ impl Server {
       .map_err(|e| StorageError::ReadFailed(e.to_string()))
   }
 
-  /// Process a RESP command and return the response
-  async fn process_command(&self, value: Value) -> Value {
+  /// Process a RESP command and return the response with optional protocol change.
+  async fn process_command(&self, value: Value) -> (Value, Option<u8>) {
     self.cmd_factory.execute(value, self).await
   }
 
@@ -169,8 +169,9 @@ impl Server {
     mut stream: TcpStream,
     peer_addr: SocketAddr,
   ) -> std::io::Result<()> {
-    let mut buffer = vec![0u8; 8192]; // 8KB buffer
-    let mut pending = Vec::new(); // Buffer for incomplete commands
+    let mut buffer = vec![0u8; 8192];
+    let mut pending = Vec::new();
+    let mut proto: u8 = 2;
 
     loop {
       match stream.read(&mut buffer).await {
@@ -179,29 +180,26 @@ impl Server {
           break;
         }
         Ok(n) => {
-          // Append new data to pending buffer
           pending.extend_from_slice(&buffer[..n]);
 
-          // Try to parse and process complete commands
           let mut processed = 0;
           while let Some((value, consumed)) = Parser::parse(&pending[processed..]) {
             processed += consumed;
 
-            // Log the parsed command
             info!("Received command from {}: {:?}", peer_addr, value);
 
-            // Process the command and get response
-            let response = self.process_command(value).await;
-            let encoded = response.encode();
+            let (response, new_proto) = self.process_command(value).await;
+            if let Some(p) = new_proto {
+              proto = p;
+            }
+            let encoded = response.encode_proto(proto);
 
-            // Send response
             if let Err(e) = stream.write_all(&encoded).await {
               warn!("Failed to write response to {}: {}", peer_addr, e);
               break;
             }
           }
 
-          // Remove processed data from pending buffer
           if processed > 0 {
             pending = pending.split_off(processed);
           }

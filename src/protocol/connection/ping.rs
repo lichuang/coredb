@@ -33,7 +33,9 @@ impl Command for PingCommand {
         Value::BulkString(None) => Ok(Value::BulkString(None)),
         Value::SimpleString(s) => Ok(Value::SimpleString(s.clone())),
         Value::Integer(i) => Ok(Value::Integer(*i)),
-        Value::Array(_) => Err(ProtocolError::InvalidArgument("argument type").into()),
+        Value::Array(_) | Value::Map(_) | Value::Pairs(_) | Value::Boolean(_) => {
+          Err(ProtocolError::InvalidArgument("argument type").into())
+        }
         Value::Error(e) => Ok(Value::Error(e.clone())),
       }
     }

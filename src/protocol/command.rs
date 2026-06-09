@@ -1,6 +1,6 @@
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::bitmap::{GetBitCommand, SetBitCommand};
-use crate::protocol::connection::PingCommand;
+use crate::protocol::connection::{HelloCommand, PingCommand};
 use crate::protocol::hash::{
   HDelCommand, HExistsCommand, HGetAllCommand, HGetCommand, HIncrByCommand, HKeysCommand,
   HLenCommand, HMGetCommand, HSetCommand, HSetNxCommand, HValsCommand,
@@ -56,6 +56,7 @@ impl CommandFactory {
     let mut factory = Self::new();
 
     // Register connection commands
+    factory.register("HELLO", HelloCommand);
     factory.register("PING", PingCommand);
 
     // Register string commands

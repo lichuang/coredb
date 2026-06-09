@@ -61,11 +61,11 @@ class TestClusterBase:
         try:
             self.nodes = [
                 NodeInfo(0, 6379, redis.Redis(host='localhost', port=6379, 
-                        decode_responses=True, socket_connect_timeout=5)),
+                        decode_responses=True, socket_connect_timeout=5, socket_timeout=30)),
                 NodeInfo(1, 6380, redis.Redis(host='localhost', port=6380, 
-                        decode_responses=True, socket_connect_timeout=5)),
+                        decode_responses=True, socket_connect_timeout=5, socket_timeout=30)),
                 NodeInfo(2, 6381, redis.Redis(host='localhost', port=6381, 
-                        decode_responses=True, socket_connect_timeout=5)),
+                        decode_responses=True, socket_connect_timeout=5, socket_timeout=30)),
             ]
             # Verify connections using the subclass-specified command
             for node in self.nodes:
@@ -222,7 +222,8 @@ class TestClusterBase:
                 host='localhost', 
                 port=node.port,
                 decode_responses=True, 
-                socket_connect_timeout=5
+                socket_connect_timeout=5,
+                socket_timeout=30
             )
             node.alive = True
             print(f"  {node} recovered successfully")

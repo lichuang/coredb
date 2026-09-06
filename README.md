@@ -109,6 +109,8 @@ print(r.get('key'))
             └───────────────┘
 ```
 
+CoreDB achieves strong consistency and durable persistence via [rockraft](https://github.com/lichuang/rockraft), a Raft consensus implementation built on RocksDB that provides the Raft node, log replication, and distributed state machine used by the storage layer.
+
 ## Commands
 
 > The command list below is sourced from the [Redis official data types documentation](https://redis.io/docs/latest/develop/data-types/).

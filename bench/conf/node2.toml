@@ -1,0 +1,15 @@
+# CoreDB Bench Node 2 - cluster mode, joins node1
+node_id = 2
+server_addr = "0.0.0.0:16380"
+
+[raft]
+address = "127.0.0.1:17372"
+advertise_host = "localhost"
+join = ["localhost:17371"]
+
+[rocksdb]
+data_path = "/tmp/coredb-bench/node2"
+max_open_files = 10000
+
+[log]
+level = "warn"

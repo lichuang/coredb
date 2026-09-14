@@ -2090,9 +2090,9 @@ dependencies = [
 
 [[package]]
 name = "rockraft"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a63d60cca3d6476265b8f6ef18dbf9cd593c68c1b9d8219cd3b977036c456267"
+checksum = "a0027c8093f60f2223775f9eaced0a5b097a625d2b52751737203c8d762a2337"
 dependencies = [
  "anyerror",
  "anyhow",

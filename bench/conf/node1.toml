@@ -1,0 +1,15 @@
+# CoreDB Bench Node 1 - single-node mode
+node_id = 1
+server_addr = "0.0.0.0:16379"
+
+[raft]
+address = "127.0.0.1:17371"
+advertise_host = "localhost"
+join = []
+
+[rocksdb]
+data_path = "/tmp/coredb-bench/node1"
+max_open_files = 10000
+
+[log]
+level = "warn"

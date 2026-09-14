@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::error::{CoreDbError, ServerError, StorageError};
-use crate::protocol::{CommandFactory, Parser, Value};
+use crate::protocol::{CommandFactory, ParseResult, Parser, Value};
 
 /// TCP server with Raft support
 pub struct Server {
@@ -183,25 +183,45 @@ impl Server {
           pending.extend_from_slice(&buffer[..n]);
 
           let mut processed = 0;
-          while let Some((value, consumed)) = Parser::parse(&pending[processed..]) {
-            processed += consumed;
+          let mut protocol_error = false;
+          loop {
+            match Parser::parse(&pending[processed..]) {
+              ParseResult::Complete(value, consumed) => {
+                processed += consumed;
 
-            info!("Received command from {}: {:?}", peer_addr, value);
+                info!("Received command from {}: {:?}", peer_addr, value);
 
-            let (response, new_proto) = self.process_command(value).await;
-            if let Some(p) = new_proto {
-              proto = p;
-            }
-            let encoded = response.encode_proto(proto);
+                let (response, new_proto) = self.process_command(value).await;
+                if let Some(p) = new_proto {
+                  proto = p;
+                }
+                let encoded = response.encode_proto(proto);
 
-            if let Err(e) = stream.write_all(&encoded).await {
-              warn!("Failed to write response to {}: {}", peer_addr, e);
-              break;
+                if let Err(e) = stream.write_all(&encoded).await {
+                  warn!("Failed to write response to {}: {}", peer_addr, e);
+                  break;
+                }
+              }
+              ParseResult::Skip(consumed) => {
+                processed += consumed;
+              }
+              ParseResult::Incomplete => break,
+              ParseResult::Invalid => {
+                protocol_error = true;
+                break;
+              }
             }
           }
 
           if processed > 0 {
             pending = pending.split_off(processed);
+          }
+
+          if protocol_error {
+            warn!("Protocol error from {}, closing connection", peer_addr);
+            let encoded = Value::error("ERR Protocol error: invalid request").encode_proto(proto);
+            let _ = stream.write_all(&encoded).await;
+            break;
           }
         }
         Err(e) => {

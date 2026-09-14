@@ -31,3 +31,15 @@ target
 *.pyo
 
 commit-message
+
+# Benchmark generated artifacts (see bench/run_bench.sh)
+# Scoped to bench/ so extension rules do not shadow tracked files elsewhere
+# (e.g. tests/requirements.txt).
+bench/results/
+bench/**/*.csv
+bench/**/*.txt
+bench/**/*.log
+bench/**/*.json
+
+# macOS Finder metadata
+.DS_Store

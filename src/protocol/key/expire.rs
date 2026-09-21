@@ -5,7 +5,7 @@
 //! Set a timeout on key. After the timeout has expired, the key will
 //! automatically be deleted. Works on any data type (string, hash, etc.).
 
-use crate::encoding::{HashMetadata, StringValue};
+use crate::encoding::{ValueMeta, with_expires_at};
 use crate::error::{CoreDbError, CoreDbResult, EncodeError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -94,10 +94,8 @@ pub enum KeyState {
   NotFound,
   /// Key exists but is expired (treat as not existing)
   Expired,
-  /// Key exists as a string value
-  String(StringValue),
-  /// Key exists as a hash
-  Hash(HashMetadata),
+  /// Key exists; carries its decoded header metadata
+  Present(ValueMeta),
 }
 
 /// Read key state from the store, handling expiration detection
@@ -107,31 +105,14 @@ pub async fn read_key_state(server: &Server, key: &str) -> CoreDbResult<KeyState
     None => return Ok(KeyState::NotFound),
   };
 
-  let now = now_ms();
-
-  // Try to deserialize as StringValue
-  if let Ok(string_value) = StringValue::deserialize(&raw_value) {
-    if string_value.is_expired(now) {
-      // Lazily delete the expired key
+  match ValueMeta::decode(&raw_value) {
+    Some(meta) if meta.is_expired(now_ms()) => {
       let _ = server.delete(key).await;
-      return Ok(KeyState::Expired);
+      Ok(KeyState::Expired)
     }
-    return Ok(KeyState::String(string_value));
+    Some(meta) => Ok(KeyState::Present(meta)),
+    None => Ok(KeyState::NotFound),
   }
-
-  // Try to deserialize as HashMetadata
-  if let Ok(hash_metadata) = HashMetadata::deserialize(&raw_value) {
-    if hash_metadata.is_expired(now) {
-      // Lazily delete the expired key
-      let _ = server.delete(key).await;
-      return Ok(KeyState::Expired);
-    }
-    return Ok(KeyState::Hash(hash_metadata));
-  }
-
-  // Unknown type — still valid, but we can't update its expiration
-  // Return as "not found" since we can't meaningfully set expiration on it
-  Ok(KeyState::NotFound)
 }
 
 /// EXPIRE command executor
@@ -146,10 +127,9 @@ impl Command for ExpireCommand {
     let key_state = read_key_state(server, &params.key).await?;
 
     // Key must exist (not expired or missing)
-    let (current_expires_at, flags) = match key_state {
+    let current_expires_at = match key_state {
       KeyState::NotFound | KeyState::Expired => return Ok(Value::Boolean(false)),
-      KeyState::String(sv) => (sv.expires_at, sv.flags),
-      KeyState::Hash(hm) => (hm.expires_at, hm.flags),
+      KeyState::Present(meta) => meta.expires_at,
     };
 
     // Calculate new expiration timestamp in milliseconds
@@ -187,20 +167,8 @@ impl Command for ExpireCommand {
       None => return Ok(Value::Boolean(false)),
     };
 
-    let data_type = flags & 0x0F;
-    let new_value = if data_type == crate::encoding::TYPE_STRING {
-      let mut sv = StringValue::deserialize(&raw_value)
-        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
-      sv.expires_at = new_expires_at;
-      sv.serialize()
-    } else if data_type == crate::encoding::TYPE_HASH {
-      let mut hm = HashMetadata::deserialize(&raw_value)
-        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
-      hm.expires_at = new_expires_at;
-      hm.serialize()
-    } else {
-      return Err(ProtocolError::Custom("ERR unsupported key type").into());
-    };
+    let new_value = with_expires_at(&raw_value, new_expires_at)
+      .ok_or_else(|| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
 
     server.set(params.key, new_value).await?;
     Ok(Value::Boolean(true))

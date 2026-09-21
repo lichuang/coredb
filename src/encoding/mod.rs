@@ -11,6 +11,7 @@ pub mod json;
 pub mod list;
 pub mod set;
 pub mod string;
+pub mod value;
 pub mod zset;
 
 /// Current format version for all encoded types (stored in high 4 bits of flags)
@@ -42,4 +43,5 @@ pub use json::JsonMetadata;
 pub use list::{ListElementValue, ListMetadata};
 pub use set::{SetMemberValue, SetMetadata};
 pub use string::StringValue;
+pub use value::{ValueMeta, is_expired, with_expires_at};
 pub use zset::{ZSetMemberValue, ZSetMetadata};

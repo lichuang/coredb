@@ -180,30 +180,42 @@ impl Command for SetCommand {
     // Get current timestamp once for all expiration calculations
     let now = now_ms();
 
+    // Pre-read the existing value only when an option actually needs it:
+    // NX/XX need existence, GET needs the old value, KEEPTTL needs the
+    // existing expiration. A plain `SET key value` must not pay for a
+    // full Raft round-trip read.
+    let needs_existing =
+      params.mode.is_some() || params.get || matches!(params.expiration, Some(Expiration::KeepTTL));
+
     // Calculate expiration timestamp in milliseconds (0 means no expiration)
-    let expires_at = match params.expiration {
-      Some(Expiration::KeepTTL) => {
-        // Read existing value to get its expiration time
-        match server.get(&params.key).await? {
-          Some(raw_value) => {
-            match StringValue::deserialize(&raw_value) {
-              Ok(existing) if existing.is_expired(now) => NO_EXPIRATION, // Expired, no TTL to keep
-              Ok(existing) if existing.has_expiration() => existing.expires_at, // Keep existing TTL
-              Ok(_) => NO_EXPIRATION,  // No existing expiration to keep
-              Err(_) => NO_EXPIRATION, // Corrupted, no TTL to keep
-            }
-          }
-          None => NO_EXPIRATION, // Key not found, no TTL to keep
-        }
+    let expires_at = if !needs_existing {
+      // No option needs the old value — skip the pre-read entirely.
+      match &params.expiration {
+        Some(Expiration::Ex(seconds)) => now + seconds * 1000,
+        Some(Expiration::Px(millis)) => now + millis,
+        Some(Expiration::ExAt(timestamp)) => timestamp * 1000,
+        Some(Expiration::PxAt(timestamp)) => *timestamp,
+        _ => NO_EXPIRATION,
       }
-      Some(exp) => match exp {
-        Expiration::Ex(seconds) => now + seconds * 1000,
-        Expiration::Px(millis) => now + millis,
-        Expiration::ExAt(timestamp) => timestamp * 1000,
-        Expiration::PxAt(timestamp) => timestamp,
-        Expiration::KeepTTL => unreachable!(), // Handled above
-      },
-      None => NO_EXPIRATION, // No expiration
+    } else {
+      match &params.expiration {
+        Some(Expiration::KeepTTL) => {
+          // Read existing value to get its expiration time
+          match server.get(&params.key).await? {
+            Some(raw_value) => match StringValue::deserialize(&raw_value) {
+              Ok(existing) if existing.is_expired(now) => NO_EXPIRATION,
+              Ok(existing) if existing.has_expiration() => existing.expires_at,
+              _ => NO_EXPIRATION,
+            },
+            None => NO_EXPIRATION,
+          }
+        }
+        Some(Expiration::Ex(seconds)) => now + seconds * 1000,
+        Some(Expiration::Px(millis)) => now + millis,
+        Some(Expiration::ExAt(timestamp)) => timestamp * 1000,
+        Some(Expiration::PxAt(timestamp)) => *timestamp,
+        None => NO_EXPIRATION,
+      }
     };
 
     // Create StringValue and serialize
@@ -223,15 +235,19 @@ impl Command for SetCommand {
       OtherType,                // Key exists but is not a string (Hash, etc.)
     }
 
-    let existing_key = match server.get(&params.key).await? {
-      Some(raw_value) => {
-        match StringValue::deserialize(&raw_value) {
-          Ok(value) if !value.is_expired(now) => ExistingKey::ValidString(value),
-          Ok(_) => ExistingKey::Expired, // Expired, treat as not exists
-          Err(_) => ExistingKey::OtherType, // Not a StringValue (might be Hash or other type)
+    let existing_key = if needs_existing {
+      match server.get(&params.key).await? {
+        Some(raw_value) => {
+          match StringValue::deserialize(&raw_value) {
+            Ok(value) if !value.is_expired(now) => ExistingKey::ValidString(value),
+            Ok(_) => ExistingKey::Expired, // Expired, treat as not exists
+            Err(_) => ExistingKey::OtherType, // Not a StringValue (might be Hash or other type)
+          }
         }
+        None => ExistingKey::None,
       }
-      None => ExistingKey::None,
+    } else {
+      ExistingKey::None
     };
 
     // Check if key exists (for NX/XX logic)

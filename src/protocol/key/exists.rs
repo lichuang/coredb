@@ -3,7 +3,7 @@
 //! EXISTS key [key ...]
 //! Returns the number of keys that exist from those specified as arguments.
 
-use crate::encoding::{HashMetadata, StringValue};
+use crate::encoding::is_expired;
 use crate::error::{CoreDbError, CoreDbResult, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -47,29 +47,11 @@ async fn key_exists(server: &Server, key: &str) -> CoreDbResult<bool> {
     None => return Ok(false),
   };
 
-  // Try to deserialize as HashMetadata first
-  if let Ok(metadata) = HashMetadata::deserialize(&raw_value) {
-    // Check if hash is expired
-    if metadata.is_expired(now_ms()) {
-      // Lazily delete the expired key
-      let _ = server.delete(key).await;
-      return Ok(false);
-    }
-    return Ok(true);
+  if is_expired(&raw_value, now_ms()) {
+    let _ = server.delete(key).await;
+    return Ok(false);
   }
 
-  // Try to deserialize as StringValue
-  if let Ok(string_value) = StringValue::deserialize(&raw_value) {
-    // Check if string is expired
-    if string_value.is_expired(now_ms()) {
-      // Lazily delete the expired key
-      let _ = server.delete(key).await;
-      return Ok(false);
-    }
-    return Ok(true);
-  }
-
-  // Unknown type but key exists, count it
   Ok(true)
 }
 

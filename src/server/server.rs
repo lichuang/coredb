@@ -7,7 +7,7 @@ use rockraft::raft::types::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::error::{CoreDbError, ServerError, StorageError};
@@ -145,6 +145,15 @@ impl Server {
     }
   }
 
+  /// Execute a transaction through Raft consensus
+  pub async fn txn(&self, req: TxnReq) -> Result<rockraft::raft::types::TxnReply, StorageError> {
+    self
+      .raft_node
+      .txn(req)
+      .await
+      .map_err(|e| StorageError::WriteFailed(e.to_string()))
+  }
+
   /// Scan keys by prefix from the state machine (forwarded to leader)
   /// Returns a vector of (key, value) tuples where keys start with the given prefix
   pub async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, StorageError> {
@@ -189,7 +198,7 @@ impl Server {
               ParseResult::Complete(value, consumed) => {
                 processed += consumed;
 
-                info!("Received command from {}: {:?}", peer_addr, value);
+                debug!("Received command from {}: {:?}", peer_addr, value);
 
                 let (response, new_proto) = self.process_command(value).await;
                 if let Some(p) = new_proto {

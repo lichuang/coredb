@@ -7,9 +7,10 @@
 //! - The number of keys that were removed
 //! - 0 if none of the specified keys existed
 
-use crate::encoding::{HashMetadata, StringValue};
+use crate::encoding::{ValueMeta, is_expired};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
+use crate::protocol::key::rename::delete_complex_key;
 use crate::protocol::resp::Value;
 use crate::server::Server;
 use crate::util::now_ms;
@@ -54,40 +55,27 @@ impl Command for DelCommand {
 
     let mut deleted_count = 0i64;
 
+    let now = now_ms();
     for key in params.keys {
-      // Try to get the value first to determine its type
       let raw_value = match server.get(&key).await? {
         Some(v) => v,
-        None => continue, // Key doesn't exist, skip
+        None => continue,
       };
 
-      // Check if it's a Hash type by trying to deserialize as HashMetadata
-      if let Ok(metadata) = HashMetadata::deserialize(&raw_value) {
-        // Check if hash is expired
-        if !metadata.is_expired(now_ms()) {
-          // It's a valid hash, delete all its fields first
-          let prefix = format!("{}|{:08x}", hex::encode(key.as_bytes()), metadata.version);
-          if let Ok(fields) = server.scan_prefix(prefix.as_bytes()).await {
-            for (field_key, _) in fields {
-              let field_key_str = String::from_utf8_lossy(&field_key);
-              let _ = server.delete(&field_key_str).await;
-            }
-          }
-          deleted_count += 1;
-        }
-        // Delete the metadata key
+      if is_expired(&raw_value, now) {
         let _ = server.delete(&key).await;
-      } else if StringValue::deserialize(&raw_value).is_ok() {
-        // It's a string value, delete it directly
-        if server.delete(&key).await? {
-          deleted_count += 1;
+        continue;
+      }
+
+      match ValueMeta::decode(&raw_value) {
+        Some(meta) if meta.kind.is_complex() => {
+          delete_complex_key(server, &key, meta.version).await?
         }
-      } else {
-        // Unknown type, try to delete anyway
-        if server.delete(&key).await? {
-          deleted_count += 1;
+        _ => {
+          server.delete(&key).await?;
         }
       }
+      deleted_count += 1;
     }
 
     Ok(Value::Integer(deleted_count))

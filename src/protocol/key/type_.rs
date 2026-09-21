@@ -1,4 +1,4 @@
-use crate::encoding::{HashMetadata, StringValue, TYPE_HASH, TYPE_STRING};
+use crate::encoding::ValueMeta;
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -36,40 +36,17 @@ impl Command for TypeCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let params = TypeParams::parse(items)?;
 
-    // Get the raw value from storage
     let raw_value = match server.get(&params.key).await? {
       Some(v) => v,
       None => return Ok(Value::SimpleString("none".to_string())),
     };
 
-    // Try to parse as HashMetadata first (since hash has more fields)
-    if let Ok(hash_meta) = HashMetadata::deserialize(&raw_value) {
-      if hash_meta.is_expired(now_ms()) {
-        return Ok(Value::SimpleString("none".to_string()));
+    match ValueMeta::decode(&raw_value) {
+      Some(meta) if !meta.is_expired(now_ms()) => {
+        Ok(Value::SimpleString(meta.kind.as_str().to_string()))
       }
-      // Check the type from flags
-      match hash_meta.get_type() {
-        TYPE_HASH => return Ok(Value::SimpleString("hash".to_string())),
-        TYPE_STRING => return Ok(Value::SimpleString("string".to_string())),
-        _ => {}
-      }
+      _ => Ok(Value::SimpleString("none".to_string())),
     }
-
-    // Try to parse as StringValue
-    if let Ok(string_value) = StringValue::deserialize(&raw_value) {
-      if string_value.is_expired(now_ms()) {
-        return Ok(Value::SimpleString("none".to_string()));
-      }
-      // Check the type from flags
-      match string_value.get_type() {
-        TYPE_STRING => return Ok(Value::SimpleString("string".to_string())),
-        TYPE_HASH => return Ok(Value::SimpleString("hash".to_string())),
-        _ => {}
-      }
-    }
-
-    // If we get here, treat it as non-existent
-    Ok(Value::SimpleString("none".to_string()))
   }
 }
 

@@ -134,6 +134,7 @@ impl HashMetadata {
   }
 
   /// Get the type from flags (low 4 bits)
+  #[allow(dead_code)]
   pub fn get_type(&self) -> u8 {
     self.flags & 0x0F
   }

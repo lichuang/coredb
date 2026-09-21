@@ -12,25 +12,54 @@ use std::sync::Arc;
 use tokio::signal;
 use tracing::{error, info};
 
-use config::Config;
+use config::{Config, LogConfig};
 use server::Server;
+use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+/// Initialize tracing from the config file: `config.log.level` drives the
+/// filter unless `RUST_LOG` overrides it; `config.log.file` redirects output
+/// to a file (otherwise stdout).
+fn init_logging(log: &LogConfig) -> Result<(), Box<dyn std::error::Error>> {
+  let env_filter = if env::var("RUST_LOG").is_ok() {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+      .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log.level))
+  } else {
+    tracing_subscriber::EnvFilter::new(&log.level)
+  };
+
+  match &log.file {
+    Some(path) => {
+      if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent)?;
+      }
+      let file_appender = tracing_appender::rolling::never(
+        std::path::Path::new(path)
+          .parent()
+          .unwrap_or(std::path::Path::new(".")),
+        std::path::Path::new(path).file_name().unwrap_or_default(),
+      );
+      tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(file_appender))
+        .init();
+    }
+    None => {
+      tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(true)
+        .with_thread_ids(true)
+        .init();
+    }
+  }
+
+  Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-  // Initialize logging
-  tracing_subscriber::fmt()
-    .with_env_filter(
-      tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-    )
-    .with_target(true)
-    .with_thread_ids(true)
-    .init();
-
-  info!("Starting CoreDB - Redis compatible distributed KV store");
-  info!("Version: 0.1.0");
-
-  // Parse command line arguments to get config path
+  // Parse command line arguments to get config path first (logging config
+  // lives in the config file, so it must be loaded before initializing logs)
   let args: Vec<String> = env::args().collect();
   let config_path = if args.len() > 2 && args[1] == "--conf" {
     args[2].clone()
@@ -44,10 +73,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let config = match Config::from_file(&config_path) {
     Ok(cfg) => cfg,
     Err(e) => {
-      error!("Failed to load configuration: {}", e);
+      eprintln!("Failed to load configuration: {}", e);
       exit(1);
     }
   };
+
+  // Initialize logging from config: RUST_LOG overrides, otherwise
+  // config.log.level; optionally redirect to config.log.file.
+  init_logging(&config.log)?;
+
+  info!("Starting CoreDB - Redis compatible distributed KV store");
+  info!("Version: 0.1.0");
 
   info!("Configuration loaded:");
   info!("  node_id: {}", config.raft.node_id);
@@ -55,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   info!("  raft_addr: {}", config.raft.raft.endpoint);
   info!("  data_path: {}", config.raft.rocksdb.data_path);
   info!("  join: {:?}", config.raft.raft.join);
+  info!("  log_level: {}", config.log.level);
 
   // Create and start server (which creates Raft node internally)
   let server = match Server::start(config).await {

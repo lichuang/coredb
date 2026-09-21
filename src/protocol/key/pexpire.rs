@@ -5,7 +5,7 @@
 //! Set a timeout on key in milliseconds. After the timeout has expired,
 //! the key will automatically be deleted. Works on any data type.
 
-use crate::encoding::{HashMetadata, StringValue};
+use crate::encoding::with_expires_at;
 use crate::error::{CoreDbError, EncodeError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::key::expire::{ExpireCondition, KeyState, read_key_state};
@@ -94,10 +94,9 @@ impl Command for PexpireCommand {
     let key_state = read_key_state(server, &params.key).await?;
 
     // Key must exist (not expired or missing)
-    let (current_expires_at, flags) = match key_state {
+    let current_expires_at = match key_state {
       KeyState::NotFound | KeyState::Expired => return Ok(Value::Boolean(false)),
-      KeyState::String(sv) => (sv.expires_at, sv.flags),
-      KeyState::Hash(hm) => (hm.expires_at, hm.flags),
+      KeyState::Present(meta) => meta.expires_at,
     };
 
     // Calculate new expiration timestamp in milliseconds
@@ -141,20 +140,8 @@ impl Command for PexpireCommand {
       None => return Ok(Value::Boolean(false)),
     };
 
-    let data_type = flags & 0x0F;
-    let new_value = if data_type == crate::encoding::TYPE_STRING {
-      let mut sv = StringValue::deserialize(&raw_value)
-        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
-      sv.expires_at = new_expires_at;
-      sv.serialize()
-    } else if data_type == crate::encoding::TYPE_HASH {
-      let mut hm = HashMetadata::deserialize(&raw_value)
-        .map_err(|_| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
-      hm.expires_at = new_expires_at;
-      hm.serialize()
-    } else {
-      return Err(ProtocolError::Custom("ERR unsupported key type").into());
-    };
+    let new_value = with_expires_at(&raw_value, new_expires_at)
+      .ok_or_else(|| EncodeError::DeserializeFailed(format!("key '{}'", params.key)))?;
 
     server.set(params.key, new_value).await?;
     Ok(Value::Boolean(true))

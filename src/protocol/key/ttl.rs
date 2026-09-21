@@ -8,9 +8,7 @@
 //! - `-1` if the key exists but has no associated expiration
 //! - `>= 0` the remaining TTL in seconds
 
-use crate::encoding::{
-  BitmapMetadata, HashMetadata, JsonMetadata, ListMetadata, SetMetadata, StringValue, ZSetMetadata,
-};
+use crate::encoding::ValueMeta;
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -49,31 +47,14 @@ pub async fn read_expires_at(server: &Server, key: &str) -> Option<u64> {
     _ => return None,
   };
 
-  let now = now_ms();
-
-  // Try each known metadata type to extract expires_at
-  macro_rules! try_deserialize {
-    ($ty:ty) => {
-      if let Ok(meta) = <$ty>::deserialize(&raw_value) {
-        if meta.is_expired(now) {
-          let _ = server.delete(key).await;
-          return None;
-        }
-        return Some(meta.expires_at);
-      }
-    };
+  match ValueMeta::decode(&raw_value) {
+    Some(meta) if meta.is_expired(now_ms()) => {
+      let _ = server.delete(key).await;
+      None
+    }
+    Some(meta) => Some(meta.expires_at),
+    None => Some(0),
   }
-
-  try_deserialize!(StringValue);
-  try_deserialize!(HashMetadata);
-  try_deserialize!(ListMetadata);
-  try_deserialize!(SetMetadata);
-  try_deserialize!(ZSetMetadata);
-  try_deserialize!(BitmapMetadata);
-  try_deserialize!(JsonMetadata);
-
-  // Unknown type: key exists but we can't tell if it has TTL
-  Some(0)
 }
 
 /// TTL command executor

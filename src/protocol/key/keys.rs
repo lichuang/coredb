@@ -12,9 +12,7 @@
 //! - `\*` matches a literal asterisk (escape)
 
 use crate::encoding::hash::HashFieldValue;
-use crate::encoding::{
-  BitmapMetadata, HashMetadata, JsonMetadata, ListMetadata, SetMetadata, StringValue, ZSetMetadata,
-};
+use crate::encoding::is_expired;
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -231,7 +229,7 @@ impl Command for KeysCommand {
       }
 
       // Check expiration: try to deserialize value and check if expired
-      if is_expired_value(value_bytes, now) {
+      if is_expired(value_bytes, now) {
         continue;
       }
 
@@ -240,48 +238,6 @@ impl Command for KeysCommand {
 
     Ok(Value::Array(Some(result_keys)))
   }
-}
-
-/// Check if a stored value is expired by attempting to deserialize it
-/// and checking the expires_at field. Returns true if expired.
-fn is_expired_value(value_bytes: &[u8], now: u64) -> bool {
-  // Try StringValue first (simple types)
-  if let Ok(sv) = StringValue::deserialize(value_bytes) {
-    return sv.is_expired(now);
-  }
-
-  // Try HashMetadata
-  if let Ok(hm) = HashMetadata::deserialize(value_bytes) {
-    return hm.is_expired(now);
-  }
-
-  // Try ListMetadata
-  if let Ok(lm) = ListMetadata::deserialize(value_bytes) {
-    return lm.is_expired(now);
-  }
-
-  // Try SetMetadata
-  if let Ok(sm) = SetMetadata::deserialize(value_bytes) {
-    return sm.is_expired(now);
-  }
-
-  // Try ZSetMetadata
-  if let Ok(zm) = ZSetMetadata::deserialize(value_bytes) {
-    return zm.is_expired(now);
-  }
-
-  // Try BitmapMetadata
-  if let Ok(bm) = BitmapMetadata::deserialize(value_bytes) {
-    return bm.is_expired(now);
-  }
-
-  // Try JsonMetadata
-  if let Ok(jm) = JsonMetadata::deserialize(value_bytes) {
-    return jm.is_expired(now);
-  }
-
-  // If we can't deserialize, don't consider it expired
-  false
 }
 
 #[cfg(test)]
@@ -509,131 +465,5 @@ mod tests {
     let p: Vec<char> = "[^a]x".chars().collect();
     assert_eq!(match_charset(&p, 0, 'a'), (false, 4));
     assert_eq!(match_charset(&p, 0, 'b'), (true, 4));
-  }
-
-  // ==================== is_expired_value Tests ====================
-
-  #[test]
-  fn test_is_expired_value_string_not_expired() {
-    let sv = StringValue::new(b"hello");
-    let bytes = sv.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_string_expired() {
-    let sv = StringValue::with_expiration(b"hello", 1000);
-    let bytes = sv.serialize();
-    assert!(is_expired_value(&bytes, 1000));
-  }
-
-  #[test]
-  fn test_is_expired_value_string_no_expiration() {
-    let sv = StringValue::new(b"hello");
-    let bytes = sv.serialize();
-    assert!(!is_expired_value(&bytes, u64::MAX));
-  }
-
-  #[test]
-  fn test_is_expired_value_hash_not_expired() {
-    let hm = HashMetadata::new();
-    let bytes = hm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_hash_expired() {
-    let mut hm = HashMetadata::new();
-    hm.expires_at = 5000;
-    let bytes = hm.serialize();
-    assert!(is_expired_value(&bytes, 5000));
-    assert!(!is_expired_value(&bytes, 4999));
-  }
-
-  #[test]
-  fn test_is_expired_value_list_not_expired() {
-    let lm = ListMetadata::new();
-    let bytes = lm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_list_expired() {
-    let mut lm = ListMetadata::new();
-    lm.expires_at = 2000;
-    let bytes = lm.serialize();
-    assert!(is_expired_value(&bytes, 2000));
-  }
-
-  #[test]
-  fn test_is_expired_value_set_not_expired() {
-    let sm = SetMetadata::new();
-    let bytes = sm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_set_expired() {
-    let mut sm = SetMetadata::new();
-    sm.expires_at = 3000;
-    let bytes = sm.serialize();
-    assert!(is_expired_value(&bytes, 3000));
-  }
-
-  #[test]
-  fn test_is_expired_value_zset_not_expired() {
-    let zm = ZSetMetadata::new();
-    let bytes = zm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_zset_expired() {
-    let mut zm = ZSetMetadata::new();
-    zm.expires_at = 4000;
-    let bytes = zm.serialize();
-    assert!(is_expired_value(&bytes, 4000));
-  }
-
-  #[test]
-  fn test_is_expired_value_bitmap_not_expired() {
-    let bm = BitmapMetadata::new();
-    let bytes = bm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_bitmap_expired() {
-    let mut bm = BitmapMetadata::new();
-    bm.expires_at = 6000;
-    let bytes = bm.serialize();
-    assert!(is_expired_value(&bytes, 6000));
-  }
-
-  #[test]
-  fn test_is_expired_value_json_not_expired() {
-    let jm = JsonMetadata::new(b"{\"key\":1}");
-    let bytes = jm.serialize();
-    assert!(!is_expired_value(&bytes, 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_json_expired() {
-    let jm = JsonMetadata::with_expiration(b"{\"key\":1}", 7000);
-    let bytes = jm.serialize();
-    assert!(is_expired_value(&bytes, 7000));
-  }
-
-  #[test]
-  fn test_is_expired_value_empty_data() {
-    assert!(!is_expired_value(b"", 9999999999));
-  }
-
-  #[test]
-  fn test_is_expired_value_random_bytes() {
-    // postcard may deserialize random bytes into some metadata type,
-    // so we verify behavior is consistent (no panic)
-    let _ = is_expired_value(b"\x00\x01\x02", 9999999999);
-    let _ = is_expired_value(b"\xff\xfe\xfd", 9999999999);
   }
 }

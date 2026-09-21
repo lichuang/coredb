@@ -3,6 +3,7 @@
 //! This module provides Redis string commands including GET and SET.
 
 pub mod append;
+pub mod atomic_incr;
 pub mod decr;
 pub mod decrby;
 pub mod get;

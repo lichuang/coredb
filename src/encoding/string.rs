@@ -67,14 +67,40 @@ impl StringValue {
     }
   }
 
-  /// Serialize to bytes using postcard
+  /// Serialize to bytes using the fixed layout `flags(1B) | expires_at(8B BE) | data(NB)`
+  ///
+  /// Hand-rolled layout instead of postcard: it is a pure memcpy (no
+  /// struct-walking), which matters because this path runs for every SET.
   pub fn serialize(&self) -> Vec<u8> {
-    postcard::to_allocvec(self).expect("serialization should succeed")
+    let mut buf = Vec::with_capacity(9 + self.data.len());
+    buf.push(self.flags);
+    buf.extend_from_slice(&self.expires_at.to_be_bytes());
+    buf.extend_from_slice(&self.data);
+    buf
   }
 
-  /// Deserialize from bytes using postcard
+  /// Deserialize from the fixed layout `flags(1B) | expires_at(8B BE) | data(NB)`
+  ///
+  /// Rejects values whose type nibble is not `TYPE_STRING` so callers can use
+  /// this to distinguish string values from other types (the layout has no
+  /// self-describing length, so a plain length check would accept any
+  /// sufficiently long value of any type).
   pub fn deserialize(bytes: &[u8]) -> Result<Self, DecodeError> {
-    postcard::from_bytes(bytes).map_err(|_| DecodeError::InvalidData)
+    if bytes.len() < 9 {
+      return Err(DecodeError::InvalidData);
+    }
+    if bytes[0] & 0x0F != TYPE_STRING {
+      return Err(DecodeError::InvalidData);
+    }
+    Ok(Self {
+      flags: bytes[0],
+      expires_at: u64::from_be_bytes(
+        bytes[1..9]
+          .try_into()
+          .map_err(|_| DecodeError::InvalidData)?,
+      ),
+      data: bytes[9..].to_vec(),
+    })
   }
 
   /// Check if this value has expired (given current timestamp in milliseconds)
@@ -91,6 +117,7 @@ impl StringValue {
   }
 
   /// Get the type from flags (low 4 bits)
+  #[allow(dead_code)]
   pub fn get_type(&self) -> u8 {
     self.flags & 0x0F
   }

@@ -6,11 +6,7 @@
 //! Returns 1 if renamed, 0 if newkey already exists.
 //! Returns an error if the source key does not exist.
 
-use crate::encoding::{
-  BitmapMetadata, BloomFilterMetadata, HashMetadata, HyperLogLogMetadata, JsonMetadata,
-  ListMetadata, SetMetadata, StringValue, TYPE_BITMAP, TYPE_BLOOMFILTER, TYPE_HASH,
-  TYPE_HYPERLOGLOG, TYPE_JSON, TYPE_LIST, TYPE_SET, TYPE_STRING, TYPE_ZSET, ZSetMetadata,
-};
+use crate::encoding::ValueMeta;
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::key::rename::{delete_dest_if_complex, rename_complex_type};
@@ -73,185 +69,36 @@ impl Command for RenameNxCommand {
 
     let now = now_ms();
 
-    // NX check: if destination exists and is not expired, return 0
     if let Some(dest_raw) = server.get(&params.new_key).await? {
       if check_dest_exists(&dest_raw, now) {
         return Ok(Value::Integer(0));
       }
-      // Destination is expired — clean it up before proceeding
       delete_dest_if_complex(server, &params.new_key, &dest_raw, now).await?;
       let _ = server.delete(&params.new_key).await;
     }
 
-    // Type dispatch — same as RENAME but with Integer(1) success value
-
-    // Attempt StringValue
-    if let Ok(sv) = StringValue::deserialize(&raw_value) {
-      if sv.is_expired(now) {
+    let meta = match ValueMeta::decode(&raw_value) {
+      Some(meta) if meta.is_expired(now) => {
         let _ = server.delete(&params.key).await;
         return Err(ProtocolError::Custom("ERR no such key").into());
       }
-      if sv.get_type() == TYPE_STRING {
-        server.set(params.new_key, sv.serialize()).await?;
-        server.delete(&params.key).await?;
-        return Ok(Value::Integer(1));
-      }
+      Some(meta) => meta,
+      None => return Err(ProtocolError::Custom("ERR no such key").into()),
+    };
+
+    if meta.kind.is_complex() {
+      return rename_complex_type(
+        server,
+        &params.key,
+        &params.new_key,
+        meta.version,
+        &raw_value,
+        now,
+        Value::Integer(1),
+      )
+      .await;
     }
 
-    // Attempt HashMetadata
-    if let Ok(hm) = HashMetadata::deserialize(&raw_value) {
-      if hm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if hm.get_type() == TYPE_HASH {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          hm.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt ListMetadata
-    if let Ok(lm) = ListMetadata::deserialize(&raw_value) {
-      if lm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if lm.get_type() == TYPE_LIST {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          lm.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt SetMetadata
-    if let Ok(sm) = SetMetadata::deserialize(&raw_value) {
-      if sm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if sm.get_type() == TYPE_SET {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          sm.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt ZSetMetadata
-    if let Ok(zm) = ZSetMetadata::deserialize(&raw_value) {
-      if zm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if zm.get_type() == TYPE_ZSET {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          zm.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt BitmapMetadata
-    if let Ok(bm) = BitmapMetadata::deserialize(&raw_value) {
-      if bm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if bm.get_type() == TYPE_BITMAP {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          bm.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt JsonMetadata (simple type — single key, like String)
-    if let Ok(jm) = JsonMetadata::deserialize(&raw_value) {
-      if jm.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if jm.get_type() == TYPE_JSON {
-        server.set(params.new_key, raw_value).await?;
-        server.delete(&params.key).await?;
-        return Ok(Value::Integer(1));
-      }
-    }
-
-    // Attempt BloomFilterMetadata (complex type — metadata + sub-keys)
-    if let Ok(bf) = BloomFilterMetadata::deserialize(&raw_value) {
-      if bf.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if bf.get_type() == TYPE_BLOOMFILTER {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          bf.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Attempt HyperLogLogMetadata (complex type — metadata + segments)
-    if let Ok(hll) = HyperLogLogMetadata::deserialize(&raw_value) {
-      if hll.is_expired(now) {
-        let _ = server.delete(&params.key).await;
-        return Err(ProtocolError::Custom("ERR no such key").into());
-      }
-      if hll.get_type() == TYPE_HYPERLOGLOG {
-        return rename_complex_type(
-          server,
-          &params.key,
-          &params.new_key,
-          hll.version,
-          &raw_value,
-          now,
-          Value::Integer(1),
-        )
-        .await;
-      }
-    }
-
-    // Unknown type — try a generic rename (just move the raw bytes)
     server.set(params.new_key, raw_value).await?;
     server.delete(&params.key).await?;
     Ok(Value::Integer(1))
@@ -260,53 +107,10 @@ impl Command for RenameNxCommand {
 
 /// Check if a destination key value is valid (exists and not expired).
 fn check_dest_exists(raw: &[u8], now: u64) -> bool {
-  if let Ok(sv) = StringValue::deserialize(raw)
-    && sv.get_type() == TYPE_STRING
-  {
-    return !sv.is_expired(now);
+  match ValueMeta::decode(raw) {
+    Some(meta) => !meta.is_expired(now),
+    None => true,
   }
-  if let Ok(hm) = HashMetadata::deserialize(raw)
-    && hm.get_type() == TYPE_HASH
-  {
-    return !hm.is_expired(now);
-  }
-  if let Ok(lm) = ListMetadata::deserialize(raw)
-    && lm.get_type() == TYPE_LIST
-  {
-    return !lm.is_expired(now);
-  }
-  if let Ok(sm) = SetMetadata::deserialize(raw)
-    && sm.get_type() == TYPE_SET
-  {
-    return !sm.is_expired(now);
-  }
-  if let Ok(zm) = ZSetMetadata::deserialize(raw)
-    && zm.get_type() == TYPE_ZSET
-  {
-    return !zm.is_expired(now);
-  }
-  if let Ok(bm) = BitmapMetadata::deserialize(raw)
-    && bm.get_type() == TYPE_BITMAP
-  {
-    return !bm.is_expired(now);
-  }
-  if let Ok(jm) = JsonMetadata::deserialize(raw)
-    && jm.get_type() == TYPE_JSON
-  {
-    return !jm.is_expired(now);
-  }
-  if let Ok(bf) = BloomFilterMetadata::deserialize(raw)
-    && bf.get_type() == TYPE_BLOOMFILTER
-  {
-    return !bf.is_expired(now);
-  }
-  if let Ok(hll) = HyperLogLogMetadata::deserialize(raw)
-    && hll.get_type() == TYPE_HYPERLOGLOG
-  {
-    return !hll.is_expired(now);
-  }
-  // Can't deserialize — treat as existing (conservative)
-  true
 }
 
 #[cfg(test)]
@@ -382,15 +186,19 @@ mod tests {
 
   #[test]
   fn test_check_dest_exists_valid_string() {
-    let sv = StringValue::new(b"hello");
-    let raw = sv.serialize();
+    let raw = crate::encoding::StringValue::new(b"hello").serialize();
     assert!(check_dest_exists(&raw, now_ms()));
+    assert!(check_dest_exists(&raw, u64::MAX));
   }
 
   #[test]
   fn test_check_dest_exists_expired_string() {
-    let sv = StringValue::with_expiration(b"hello", 1); // expired
-    let raw = sv.serialize();
+    let raw = crate::encoding::StringValue::with_expiration(b"hello", 1).serialize();
     assert!(!check_dest_exists(&raw, now_ms()));
+  }
+
+  #[test]
+  fn test_check_dest_exists_undecodable_is_conservative() {
+    assert!(check_dest_exists(&[0x0F, 0x00], now_ms()));
   }
 }

@@ -10,11 +10,7 @@
 //! - `1` if the timeout was removed
 //! - `0` if the key does not exist or does not have an associated timeout
 
-use crate::encoding::NO_EXPIRATION;
-use crate::encoding::{
-  BitmapMetadata, BloomFilterMetadata, HashMetadata, HyperLogLogMetadata, JsonMetadata,
-  ListMetadata, SetMetadata, StringValue, ZSetMetadata,
-};
+use crate::encoding::{NO_EXPIRATION, ValueMeta, with_expires_at};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
@@ -60,37 +56,20 @@ impl Command for PersistCommand {
       None => return Ok(Value::Boolean(false)),
     };
 
-    let now = now_ms();
-
-    macro_rules! try_persist {
-      ($ty:ty) => {
-        if let Ok(mut meta) = <$ty>::deserialize(&raw_value) {
-          if meta.is_expired(now) {
-            let _ = server.delete(&params.key).await;
-            return Ok(Value::Boolean(false));
-          }
-          if meta.expires_at == NO_EXPIRATION {
-            return Ok(Value::Boolean(false));
-          }
-          meta.expires_at = NO_EXPIRATION;
-          server.set(params.key.clone(), meta.serialize()).await?;
-          return Ok(Value::Boolean(true));
-        }
-      };
+    match ValueMeta::decode(&raw_value) {
+      Some(meta) if meta.is_expired(now_ms()) => {
+        let _ = server.delete(&params.key).await;
+        Ok(Value::Boolean(false))
+      }
+      Some(meta) if meta.expires_at == NO_EXPIRATION => Ok(Value::Boolean(false)),
+      Some(_) => {
+        let new_value = with_expires_at(&raw_value, NO_EXPIRATION)
+          .ok_or(ProtocolError::Custom("ERR unsupported key type"))?;
+        server.set(params.key.clone(), new_value).await?;
+        Ok(Value::Boolean(true))
+      }
+      None => Ok(Value::Boolean(false)),
     }
-
-    try_persist!(StringValue);
-    try_persist!(HashMetadata);
-    try_persist!(ListMetadata);
-    try_persist!(SetMetadata);
-    try_persist!(ZSetMetadata);
-    try_persist!(BitmapMetadata);
-    try_persist!(BloomFilterMetadata);
-    try_persist!(HyperLogLogMetadata);
-    try_persist!(JsonMetadata);
-
-    // Unknown type
-    Ok(Value::Boolean(false))
   }
 }
 

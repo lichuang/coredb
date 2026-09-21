@@ -2,8 +2,8 @@ use crate::encoding::StringValue;
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
+use crate::protocol::string::set::set_if_not_exists;
 use crate::server::Server;
-use crate::util::now_ms;
 use async_trait::async_trait;
 
 /// Parameters for SETNX command
@@ -50,36 +50,9 @@ impl Command for SetnxCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let params = SetnxParams::parse(items)?;
 
-    let now = now_ms();
-
-    // Check if key exists
-    match server.get(&params.key).await {
-      Ok(Some(raw_value)) => {
-        match StringValue::deserialize(&raw_value) {
-          Ok(value) if !value.is_expired(now) => {
-            // Key exists and is not expired, do not set
-            return Ok(Value::Integer(0));
-          }
-          Ok(_) => {
-            // Key is expired, treat as not exists - fall through to set
-          }
-          Err(_) => {
-            // Not a StringValue (might be Hash or other type) - key exists
-            return Ok(Value::Integer(0));
-          }
-        }
-      }
-      Ok(None) => {
-        // Key doesn't exist - fall through to set
-      }
-      Err(e) => return Err(e.into()),
-    }
-
-    let string_value = StringValue::new(params.value);
-    let serialized = string_value.serialize();
-
-    server.set(params.key, serialized).await?;
-    Ok(Value::Integer(1))
+    let serialized = StringValue::new(params.value).serialize();
+    let applied = set_if_not_exists(server, &params.key, serialized).await?;
+    Ok(Value::Integer(i64::from(applied)))
   }
 }
 

@@ -3584,7 +3584,78 @@ class TestClusterString(TestClusterBase):
         
         print("\033[32m  PASSED\033[0m")
         return True
-    
+
+    def test_set_nx_concurrent_atomicity(self) -> bool:
+        """Test that racing SET NX from many clients lets exactly one win.
+
+        This is the atomicity guarantee reported in
+        https://github.com/lichuang/coredb/issues/1: two concurrent
+        `SET key value NX` must not both succeed.
+        """
+        print("\nTest: Concurrent SET NX atomicity (8 clients, same key)")
+
+        import threading
+
+        test_key = "nx_concurrent_key"
+        num_clients = 8
+        attempts_per_client = 5
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        winners = []
+        losers = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for _ in range(attempts_per_client):
+                    # SET NX via the standard API; nil reply means lost race
+                    result = node.set(test_key, f"client-{client_id}", nx=True)
+                    if result is True:
+                        winners.append(client_id)
+                    elif result is None:
+                        losers.append(client_id)
+                    else:
+                        errors.append(f"client-{client_id}: unexpected {result}")
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(winners) != 1:
+            print(
+                f"\033[31m  FAILED: expected exactly 1 winner, got {len(winners)} "
+                f"(winners={winners})"
+            )
+            return False
+
+        value = write_node.get(test_key)
+        expected = f"client-{winners[0]}"
+        if value != expected:
+            print(f"\033[31m  FAILED: expected '{expected}', got '{value}'")
+            return False
+
+        print(f"  {num_clients} clients x {attempts_per_client} racing SET NX")
+        print(f"  -> exactly 1 winner (client-{winners[0]}), "
+              f"{len(losers)} correctly rejected: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_getset_existing_key(self) -> bool:
         """Test GETSET on existing key returns old value and sets new value."""
         print("\nTest: GETSET on existing key")
@@ -5384,6 +5455,7 @@ class TestClusterString(TestClusterBase):
             self.test_setnx_replication,
             self.test_setnx_wrong_type,
             self.test_setnx_wrong_args,
+            self.test_set_nx_concurrent_atomicity,
             self.test_getset_existing_key,
             self.test_getset_nonexistent_key,
             self.test_getset_discards_ttl,

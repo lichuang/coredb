@@ -11,10 +11,7 @@ use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 use crate::encoding::{NO_EXPIRATION, StringValue};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::server::Server;
-use crate::util::now_ms;
-
-/// Bound on CAS retries under contention; each retry re-reads and re-issues.
-const MAX_CAS_RETRIES: usize = 32;
+use crate::util::{MAX_CAS_RETRIES, now_ms};
 
 fn parse_i64(data: &[u8]) -> Option<i64> {
   std::str::from_utf8(data).ok()?.trim().parse::<i64>().ok()

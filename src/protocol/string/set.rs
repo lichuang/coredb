@@ -3,8 +3,9 @@ use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, now_ms};
 use async_trait::async_trait;
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 /// Expiration time options for SET command
 #[derive(Debug, Clone, PartialEq)]
@@ -22,7 +23,7 @@ pub enum Expiration {
 }
 
 /// Set mode options (NX/XX)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SetMode {
   /// NX - Only set the key if it does not already exist
   Nx,
@@ -177,141 +178,370 @@ impl Command for SetCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let params = SetParams::parse(items)?;
 
-    // Get current timestamp once for all expiration calculations
     let now = now_ms();
+    let new_value = params.value.clone();
+    let with_get = params.get;
 
-    // Pre-read the existing value only when an option actually needs it:
-    // NX/XX need existence, GET needs the old value, KEEPTTL needs the
-    // existing expiration. A plain `SET key value` must not pay for a
-    // full Raft round-trip read.
-    let needs_existing =
-      params.mode.is_some() || params.get || matches!(params.expiration, Some(Expiration::KeepTTL));
-
-    // Calculate expiration timestamp in milliseconds (0 means no expiration)
-    let expires_at = if !needs_existing {
-      // No option needs the old value — skip the pre-read entirely.
-      match &params.expiration {
-        Some(Expiration::Ex(seconds)) => now + seconds * 1000,
-        Some(Expiration::Px(millis)) => now + millis,
-        Some(Expiration::ExAt(timestamp)) => timestamp * 1000,
-        Some(Expiration::PxAt(timestamp)) => *timestamp,
-        _ => NO_EXPIRATION,
-      }
-    } else {
-      match &params.expiration {
-        Some(Expiration::KeepTTL) => {
-          // Read existing value to get its expiration time
-          match server.get(&params.key).await? {
-            Some(raw_value) => match StringValue::deserialize(&raw_value) {
-              Ok(existing) if existing.is_expired(now) => NO_EXPIRATION,
-              Ok(existing) if existing.has_expiration() => existing.expires_at,
-              _ => NO_EXPIRATION,
-            },
-            None => NO_EXPIRATION,
-          }
-        }
-        Some(Expiration::Ex(seconds)) => now + seconds * 1000,
-        Some(Expiration::Px(millis)) => now + millis,
-        Some(Expiration::ExAt(timestamp)) => timestamp * 1000,
-        Some(Expiration::PxAt(timestamp)) => *timestamp,
-        None => NO_EXPIRATION,
-      }
-    };
-
-    // Create StringValue and serialize
-    let string_value = if expires_at == NO_EXPIRATION {
-      StringValue::new(params.value)
-    } else {
-      StringValue::with_expiration(params.value, expires_at)
-    };
-    let serialized = string_value.serialize();
-
-    // Check if key exists and get old value (for NX/XX/GET logic)
-    // We need to track both: (1) if key exists for NX/XX logic, (2) the actual value for GET option
-    enum ExistingKey {
-      None,                     // Key doesn't exist
-      Expired,                  // Key exists but is expired
-      ValidString(StringValue), // Key exists and is a valid string
-      OtherType,                // Key exists but is not a string (Hash, etc.)
-    }
-
-    let existing_key = if needs_existing {
-      match server.get(&params.key).await? {
-        Some(raw_value) => {
-          match StringValue::deserialize(&raw_value) {
-            Ok(value) if !value.is_expired(now) => ExistingKey::ValidString(value),
-            Ok(_) => ExistingKey::Expired, // Expired, treat as not exists
-            Err(_) => ExistingKey::OtherType, // Not a StringValue (might be Hash or other type)
-          }
-        }
-        None => ExistingKey::None,
-      }
-    } else {
-      ExistingKey::None
-    };
-
-    // Check if key exists (for NX/XX logic)
-    let key_exists = matches!(
-      existing_key,
-      ExistingKey::ValidString(_) | ExistingKey::OtherType
-    );
-
-    // Apply NX/XX mode logic
     match params.mode {
-      Some(SetMode::Nx) => {
-        // NX: Only set if key does not exist
-        if key_exists {
-          // Key exists, do not set
-          return Ok(if params.get {
-            // GET with NX: return current value if it's a string, otherwise nil
-            match existing_key {
-              ExistingKey::ValidString(v) => Value::BulkString(Some(v.data)),
-              _ => Value::BulkString(None), // Other type, return nil
-            }
-          } else {
-            // Just return nil (nil bulk string)
-            Value::BulkString(None)
-          });
-        }
-      }
-      Some(SetMode::Xx) => {
-        // XX: Only set if key exists
-        if !key_exists {
-          // Key does not exist, do not set
-          return Ok(if params.get {
-            // GET with XX: return nil since key doesn't exist
-            Value::BulkString(None)
-          } else {
-            Value::BulkString(None)
-          });
-        }
-      }
+      // Unconditional SET: one atomic log entry, no condition needed. GET's
+      // previous value comes back from the txn.
       None => {
-        // No mode restriction, always set
+        let expires_at = resolve_expiration(server, &params, now).await?;
+        let serialized = build_value(new_value, expires_at);
+        if with_get {
+          let req = TxnReq::new(vec![]).if_then(UpsertKV::insert(&params.key, &serialized));
+          match server.txn(req.with_return_previous()).await? {
+            TxnReply::Success { prev_values, .. } => Ok(Value::BulkString(decode_previous(
+              prev_values.into_iter().next().flatten(),
+              now,
+            ))),
+          }
+        } else {
+          server.set(params.key, serialized).await?;
+          Ok(Value::ok())
+        }
+      }
+      Some(mode) => {
+        let key = params.key.clone();
+        let expires_at = resolve_expiration(server, &params, now).await?;
+        let serialized = build_value(new_value, expires_at);
+        conditional_set(server, &key, serialized, mode, with_get).await
       }
     }
+  }
+}
 
-    // Store the old value for GET option before we overwrite
-    let old_value_data = match existing_key {
-      ExistingKey::ValidString(v) => Some(v.data),
-      _ => None, // Return nil for expired, non-existent, or other types
+async fn resolve_expiration(
+  server: &Server,
+  params: &SetParams,
+  now: u64,
+) -> Result<u64, CoreDbError> {
+  match &params.expiration {
+    Some(Expiration::KeepTTL) => keep_ttl_expires_at(server, &params.key, now).await,
+    _ => Ok(absolute_expires_at(&params.expiration, now)),
+  }
+}
+
+fn absolute_expires_at(expiration: &Option<Expiration>, now: u64) -> u64 {
+  match expiration {
+    Some(Expiration::Ex(seconds)) => now + seconds * 1000,
+    Some(Expiration::Px(millis)) => now + millis,
+    Some(Expiration::ExAt(timestamp)) => timestamp * 1000,
+    Some(Expiration::PxAt(timestamp)) => *timestamp,
+    _ => NO_EXPIRATION,
+  }
+}
+
+async fn keep_ttl_expires_at(server: &Server, key: &str, now: u64) -> Result<u64, CoreDbError> {
+  Ok(match server.get(key).await? {
+    Some(raw_value) => match StringValue::deserialize(&raw_value) {
+      Ok(existing) if existing.is_expired(now) => NO_EXPIRATION,
+      Ok(existing) if existing.has_expiration() => existing.expires_at,
+      _ => NO_EXPIRATION,
+    },
+    None => NO_EXPIRATION,
+  })
+}
+
+fn build_value(data: Vec<u8>, expires_at: u64) -> Vec<u8> {
+  if expires_at == NO_EXPIRATION {
+    StringValue::new(data)
+  } else {
+    StringValue::with_expiration(data, expires_at)
+  }
+  .serialize()
+}
+
+/// Decode a previous-value returned by the transaction into user data.
+///
+/// rockraft returns the raw stored bytes (header + payload); the GET option
+/// must reply with the decoded string, and nil for an expired or foreign-type
+/// value.
+fn decode_previous(raw: Option<Vec<u8>>, now: u64) -> Option<Vec<u8>> {
+  let bytes = raw?;
+  match StringValue::deserialize(&bytes) {
+    Ok(sv) if !sv.is_expired(now) => Some(sv.data),
+    _ => None,
+  }
+}
+
+/// Observed state of the key, before any write.
+enum Observed {
+  Absent,
+  /// A live (unexpired) string.
+  Live,
+  /// Bytes exist but belong to an expired string: logically absent, but the
+  /// CAS must still pin these exact bytes.
+  Expired,
+  /// A key of some other type; SET overwrites it.
+  OtherType,
+}
+
+/// The reply for a conditional SET: whether the value landed, and the previous
+/// value when the GET option was requested.
+struct SetOutcome {
+  applied: bool,
+  previous: Option<Vec<u8>>,
+}
+
+/// SETNX semantics shared with the SETNX command: insert only if the key does
+/// not exist, atomically. Returns whether the value was applied.
+pub async fn set_if_not_exists(
+  server: &Server,
+  key: &str,
+  serialized: Vec<u8>,
+) -> Result<bool, CoreDbError> {
+  for _ in 0..MAX_CAS_RETRIES {
+    let raw = server.get(key).await?;
+    let observed = classify(&raw, now_ms());
+
+    if matches!(observed, Observed::Live | Observed::OtherType) {
+      return Ok(false);
+    }
+
+    // Pin the observed state: `not_exists` when absent, the exact bytes when an
+    // expired string is being resurrected.
+    let condition = match &raw {
+      None => TxnCondition::not_exists(key),
+      Some(bytes) => TxnCondition::eq(key, bytes),
     };
 
-    // Set the new value
-    server.set(params.key, serialized).await?;
+    let req = TxnReq::new(vec![condition]).if_then(UpsertKV::insert(key, &serialized));
+    match server.txn(req).await? {
+      TxnReply::Success { branch: true, .. } => return Ok(true),
+      _ => continue,
+    }
+  }
 
-    Ok(if params.get {
-      // Return the previous value (or nil if key didn't exist)
-      Value::BulkString(old_value_data)
-    } else {
-      Value::ok()
-    })
+  Err(ProtocolError::Custom("ERR set retry limit exceeded").into())
+}
+
+/// Apply `SET key value [NX|XX]` atomically.
+///
+/// The observation and the write are two separate Raft round trips, so the
+/// write is guarded by a condition that pins the observed bytes: the insert
+/// only lands if the key is still in the observed state at apply time. Losing
+/// the race re-observes and retries, so the decision is always made against
+/// the state at apply time — two racing `SET NX` on an absent key can no
+/// longer both succeed.
+async fn conditional_set(
+  server: &Server,
+  key: &str,
+  serialized: Vec<u8>,
+  mode: SetMode,
+  with_get: bool,
+) -> Result<Value, CoreDbError> {
+  let now = now_ms();
+
+  for _ in 0..MAX_CAS_RETRIES {
+    let raw = server.get(key).await?;
+    let observed = classify(&raw, now);
+
+    if let Some(outcome) = rejected_by_mode(&observed, mode, &raw, with_get) {
+      return Ok(outcome);
+    }
+
+    let condition = match &raw {
+      None => TxnCondition::not_exists(key),
+      Some(bytes) => TxnCondition::eq(key, bytes),
+    };
+
+    let mut req = TxnReq::new(vec![condition]).if_then(UpsertKV::insert(key, &serialized));
+    if with_get {
+      req = req.with_return_previous();
+    }
+
+    match server.txn(req).await? {
+      TxnReply::Success {
+        branch: true,
+        prev_values,
+      } => {
+        let previous = if with_get {
+          decode_previous(prev_values.into_iter().next().flatten(), now)
+        } else {
+          None
+        };
+        return Ok(make_reply(
+          SetOutcome {
+            applied: true,
+            previous,
+          },
+          with_get,
+        ));
+      }
+      _ => continue,
+    }
+  }
+
+  Err(ProtocolError::Custom("ERR set retry limit exceeded").into())
+}
+
+fn classify(raw: &Option<Vec<u8>>, now: u64) -> Observed {
+  match raw {
+    None => Observed::Absent,
+    Some(bytes) => match StringValue::deserialize(bytes) {
+      Ok(sv) if sv.is_expired(now) => Observed::Expired,
+      Ok(_) => Observed::Live,
+      Err(_) => Observed::OtherType,
+    },
+  }
+}
+
+/// Reject without writing when the observed state already decides the outcome.
+///
+/// These paths mirror the unconditional read-then-decide behaviour: the residual
+/// race (the key changing between observation and reply) is the same one the
+/// pre-transaction code had, and avoiding a write here keeps failed NX/XX
+/// attempts cheap.
+fn rejected_by_mode(
+  observed: &Observed,
+  mode: SetMode,
+  raw: &Option<Vec<u8>>,
+  with_get: bool,
+) -> Option<Value> {
+  let rejected = match mode {
+    SetMode::Nx => matches!(observed, Observed::Live | Observed::OtherType),
+    SetMode::Xx => matches!(observed, Observed::Absent | Observed::Expired),
+  };
+  if !rejected {
+    return None;
+  }
+  let previous = if with_get {
+    observed_previous(observed, raw)
+  } else {
+    None
+  };
+  Some(make_reply(
+    SetOutcome {
+      applied: false,
+      previous,
+    },
+    with_get,
+  ))
+}
+
+fn observed_previous(observed: &Observed, raw: &Option<Vec<u8>>) -> Option<Vec<u8>> {
+  match observed {
+    Observed::Live => raw
+      .as_deref()
+      .and_then(|bytes| StringValue::deserialize(bytes).ok())
+      .map(|sv| sv.data),
+    _ => None,
+  }
+}
+
+fn make_reply(outcome: SetOutcome, with_get: bool) -> Value {
+  if with_get {
+    Value::BulkString(outcome.previous)
+  } else if outcome.applied {
+    Value::ok()
+  } else {
+    Value::BulkString(None)
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn test_classify_states() {
+    let now = 10_000;
+
+    assert!(matches!(classify(&None, now), Observed::Absent));
+
+    let live = StringValue::with_expiration(b"v", 20_000).serialize();
+    assert!(matches!(classify(&Some(live), now), Observed::Live));
+
+    let expired = StringValue::with_expiration(b"v", 5_000).serialize();
+    assert!(matches!(classify(&Some(expired), now), Observed::Expired));
+
+    let no_ttl = StringValue::new(b"v").serialize();
+    assert!(matches!(classify(&Some(no_ttl), now), Observed::Live));
+
+    // Other type (e.g. hash metadata bytes) decodes as OtherType.
+    let other = b"\x12\x00\x00\x00\x00\x00\x00\x00\x00\x00".to_vec();
+    assert!(matches!(classify(&Some(other), now), Observed::OtherType));
+  }
+
+  /// NX/XX fast-reject decisions, per observed state.
+  #[test]
+  fn test_rejected_by_mode_matrix() {
+    let now = 10_000;
+    let live = StringValue::with_expiration(b"v", 20_000).serialize();
+    let expired = StringValue::with_expiration(b"v", 5_000).serialize();
+
+    let cases = [
+      (None, SetMode::Nx, false),
+      (None, SetMode::Xx, true),
+      (Some(live.clone()), SetMode::Nx, true),
+      (Some(live.clone()), SetMode::Xx, false),
+      (Some(expired.clone()), SetMode::Nx, false),
+      (Some(expired), SetMode::Xx, true),
+    ];
+
+    for (raw, mode, expect_reject) in cases {
+      let observed = classify(&raw, now);
+      let rejected = rejected_by_mode(&observed, mode, &raw, false);
+      assert_eq!(
+        rejected.is_some(),
+        expect_reject,
+        "raw={raw:?} mode={mode:?}"
+      );
+      if let Some(reply) = rejected {
+        assert_eq!(
+          reply,
+          Value::BulkString(None),
+          "rejected reply must be nil for {mode:?}"
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn test_make_reply_applied_vs_rejected() {
+    assert_eq!(
+      make_reply(
+        SetOutcome {
+          applied: true,
+          previous: None
+        },
+        false
+      ),
+      Value::ok()
+    );
+    assert_eq!(
+      make_reply(
+        SetOutcome {
+          applied: false,
+          previous: None
+        },
+        false
+      ),
+      Value::BulkString(None)
+    );
+    assert_eq!(
+      make_reply(
+        SetOutcome {
+          applied: true,
+          previous: Some(b"old".to_vec())
+        },
+        true
+      ),
+      Value::BulkString(Some(b"old".to_vec()))
+    );
+  }
+
+  #[test]
+  fn test_observed_previous_only_for_live_strings() {
+    let now = 10_000;
+    let live = StringValue::with_expiration(b"old-value", 20_000).serialize();
+    assert_eq!(
+      observed_previous(&Observed::Live, &Some(live)),
+      Some(b"old-value".to_vec())
+    );
+    assert_eq!(observed_previous(&Observed::Absent, &None), None);
+  }
 
   #[test]
   fn test_set_params_parse_basic() {

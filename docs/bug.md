@@ -2,8 +2,7 @@
 
 > 记录实测复现的正确性缺陷、根因分析与修复方向。
 >
-> 记录时间：2026-09-21
-> 代码版本：`a54d5a0`
+> 记录时间：2026-09-21（代码版本 `a54d5a0`）；随后已合入 `SET NX/XX`/`SETNX` 原子化与 `MAX_CAS_RETRIES` 归位 `util/cas.rs`。
 > 测试环境：单节点（`127.0.0.1:16679`，Raft `127.0.0.1:17671`），release build
 > 关联 issue：[lichuang/coredb#1 Operational atomicity issues](https://github.com/lichuang/coredb/issues/1)
 
@@ -134,6 +133,8 @@ redis-cli HKEYS hh | wc -l # -> 99  (接近正确)
 | `HSET`/`SADD`/`ZADD` | 各自写 `size = 读到的size + 1` 回 metadata → 计数远小于实际 |
 | `LPOP`/`RPOP` | 读到同一 `head`/`tail` → 弹出同一元素（重复弹出）或漏弹 |
 
+补充一个复合失效：**`version` 由 `generate_version()`（毫秒时间戳）生成**（`encoding/hash.rs:79`、`list.rs:118`、`zset.rs:91`）。若并发首个写入落在**不同毫秒**，各请求会以不同 `version` 写子键，而 metadata 只保留最后写入者的 version —— 先前 version 空间里的子键**整体不可见**（孤儿数据）。这解释了 `ZADD` 丢成员（48/50）与 `SADD` 有时"恰好正确"（同毫秒则同一 version 空间、不同成员不冲突）的差异。
+
 ### 2.4 为什么 `batch_write` 不够
 
 `server.batch_write()` 保证**单次提交内**的多个 entry 原子（all-or-nothing），但**跨请求**的读-改-写序列没有任何保证。原子性的边界画错了一层。
@@ -144,7 +145,7 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 
 > 两个 `SET key value NX` 都读到 key 不存在，于是都执行 insert，两条都成功。
 
-该问题已在 `SET NX` / `SETNX` 上用**条件事务**修复（见第 4 节），但同类的 hash/list/zset/set/bitmap 命令尚未修复。
+该问题已在 `SET NX` / `SETNX` 上用**条件事务**修复（见第 4 节），并发回归测试见 `tests/test_cluster_string.py::test_set_nx_concurrent_atomicity`。同类的 hash/list/zset/set/bitmap 命令尚未修复。
 
 ---
 
@@ -175,22 +176,35 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `src/protocol/list/lrem.rs` | 同模式 | 同模式 |
 | `src/protocol/list/lset.rs` | 同模式 | 同模式 |
 | `src/protocol/bitmap/setbit.rs` | `:117`, `:140` | `:157` |
-| `src/protocol/string/getset.rs` | 已是 txn，待复核 | — |
 | `src/protocol/key/expire.rs` / `pexpire.rs` | 读 TTL → 写回 | 同模式 |
 | `src/protocol/key/rename.rs` / `renamenx.rs` | 读源 → 批量搬移 | 同模式 |
 
-### 3.3 已修复（作为参考实现）
+### 3.3 已确认（写路径原子，但存在独立缺陷）
+
+**`GETSET`**（`src/protocol/string/getset.rs`）：主写入走 `server.getset()`（无条件的 `TxnReq` + `return_previous`），原子性 ✅。但存在一个**独立的竞态**：当旧值不是 `StringValue`（如 hash 元数据）时，命令报 `WRONGTYPE` 并把原始字节写回去"恢复"（`getset.rs` 的 `server.set(params.key, raw)`）。这次恢复是独立的 Raft 写：
+
+1. `GETSET` 已生效（写入了新值）
+2. 并发客户端写入新值
+3. `WRONGTYPE` 恢复路径用**过期快照**覆盖 → **并发写丢失**
+
+属于 §1 同类问题，修复时应一并纳入。
+
+### 3.4 已修复（作为参考实现）
 
 | 命令 | 修复方式 | 文件 |
 |---|---|---|
 | `SET NX` / `SET XX` / `SETNX` | `TxnCondition` 条件事务 + CAS 重试 | `src/protocol/string/set.rs`, `setnx.rs` |
 | `INCR` / `INCRBY` / `DECR` / `DECRBY` | 应用层 CAS（`TxnCondition::eq` + `if_then`） | `src/protocol/string/atomic_incr.rs` |
 
+> ⚠️ **参考时须注意**：`atomic_incr` 的 CAS 重试在**热点 key 下会耗尽上限**（实测 100 并发打同一 key，2000 次请求仅约 60 次成功，其余报 `ERR increment retry limit exceeded`）。这是"每个重试都是完整读+事务往返"的固有代价——冲突概率 ≈ 1/N，N 个并发客户端需要 N 次重试。
+>
+> 含义：方案 B 若简单复制此模式，会把同样的可用性悬崖带进 hash/list 等命令。修复时需同时改进重试策略（加退避/jitter、提高上限，或改用 §5 方案 C 的单次 apply RMW）。
+
 ---
 
 ## 4. 已确认可用的修复原语
 
-rockraft 0.1.8（本地 `~/source/rs/rockraft`，git 干净，HEAD `7957bf1`；亦与注册表版本一致）的 `TxnReq` + `TxnCondition` 可表达所需条件，且**条件求值与写入在同一次 apply 内完成**：
+rockraft 0.1.8 的 `TxnReq` + `TxnCondition` 可表达所需条件，且**条件求值与写入在同一次 apply 内完成**：
 
 - `src/raft/store/statemachine.rs:431 apply_txn`：先求值全部条件，再 stage 写入
 - `src/raft/store/statemachine.rs:486 get_kv_with_overlay`：条件读先查 `PendingWrites` overlay，再落 RocksDB
@@ -198,6 +212,10 @@ rockraft 0.1.8（本地 `~/source/rs/rockraft`，git 干净，HEAD `7957bf1`；�
 - `src/raft/store/statemachine.rs:73 evaluate_condition`：支持 `Exists` / `NotExists` / `Equal` / `NotEqual` / `Greater` / `Less` / `GreaterEqual` / `LessEqual`
 
 条件构造器：`TxnCondition::{exists, not_exists, eq, ne, gt, lt, ge, le}`。
+
+### 依赖状态（2026-09-21 更新）
+
+CoreDB 的 `Cargo.toml` 现指向**本地 rockraft**（`path = "../rockraft"`），本地工作区含 6 个文件的未提交性能优化（转发接入连接池、leader 探测 200ms + 5s 总预算 + jitter、池初始化竞态修复）。此前文档所记"git 干净、与注册表版本一致"已**不再成立**；上述 `apply_txn`/`get_kv_with_overlay`/`evaluate_condition` 的行为在两边一致，不受影响。
 
 ### 关键提醒
 
@@ -220,7 +238,7 @@ rockraft 0.1.8（本地 `~/source/rs/rockraft`，git 干净，HEAD `7957bf1`；�
 
 - ✅ 可立即实施，无需改 rockraft
 - ❌ 需改 15+ 个命令，重复代码多
-- ❌ 热点 key 下有重试开销（`HINCRBY` 已暴露此风险）
+- ❌ 热点 key 下有重试开销（`HINCRBY` 已暴露此风险；见 §3.4 的可用性悬崖警告）
 
 ### 方案 B：统一 `atomic_mutate` helper（推荐）
 
@@ -237,12 +255,14 @@ server.atomic_mutate(key, |old_meta| -> (Vec<UpsertKV>, T) )  // 条件读 + 条
 
 ### 方案 C：rockraft 层提供原子 RMW 原语（长期）
 
-在 rockraft 内实现"读-改-写"在单次 apply 内完成的原语。
+在 rockraft 内实现"读-改-写"在单次 apply 内完成的原语（如 `TxnIncr` 的思路：命令本身进日志，状态机在 apply 时刻求值）。
 
 - ✅ 最彻底，且能顺带解决 TTL 感知
-- ❌ 需要改 rockraft 并维护 fork / 上游
+- ✅ **同时消除 CAS 的两次往返与热点重试风暴**（无竞争时与无条件写同价）
+- ⚠️ 曾经试过并回退：早期实现把裸整数写入存储（破坏 CoreDB 编码契约）且用 `io::Error` 表达业务错误导致 openraft RaftCore 退出。**方向正确、层次做错**——若重试，需把编码语义随命令下传（状态机只见应用层编码的字节），并确保业务错误不触发共识核心退出
+- ❌ 需要改 rockraft 并维护 fork / 上游（CoreDB 当前已依赖本地 path，落地门槛比之前低）
 
-**建议**：先做方案 B（CoreDB 内统一 helper），验证后再评估是否下沉到 rockraft（方案 C）。
+**建议**：先做方案 B（CoreDB 内统一 helper），验证后再评估是否下沉到 rockraft（方案 C）。若走方案 B，**必须同步改进重试策略**（退避 + jitter + 更高上限），避免复制 `atomic_incr` 的可用性悬崖。
 
 ---
 
@@ -281,14 +301,17 @@ redis-cli -p 16679 LLEN lp2       # 实测 ~22
 ```
 
 > 说明：并发由 shell `&` 提供，客户端无重试；单节点即可复现，不依赖集群。
-> 集群环境下 P0/P1（见 `docs/bench.md`）会额外叠加转发与连接失败问题。
+> 集群环境另有独立的性能/稳定性问题（follower 转发、连接失败），记录见 `docs/bench.md`；
+> 其中转发路径每请求新建 gRPC channel 的问题已由本地 rockraft 优化修复（follower 写 ~600 → ~10,900 rps）。
 
 ---
 
 ## 7. 待办
 
 - [ ] 实测 `LPOP`/`RPOP`/`LREM`/`LSET`/`HDEL`/`SREM`/`ZREM` 的具体丢失率
-- [ ] 设计并实现统一 `atomic_mutate` helper（方案 B）
+- [ ] 实测 `GETSET` 对非 string 旧值的并发覆盖（§3.3 的恢复竞态）
+- [ ] 设计并实现统一 `atomic_mutate` helper（方案 B），**同步改进重试策略（退避 + jitter）**
 - [ ] 逐个迁移受影响命令
 - [ ] 为每类命令补充并发集成测试（参照 `test_set_nx_concurrent_atomicity`）
-- [ ] 评估是否将原子 RMW 下沉到 rockraft（方案 C）
+- [ ] 评估是否将原子 RMW 下沉到 rockraft（方案 C），规避此前 TxnIncr 的两个实现错误
+- [ ] 修复 `GETSET` 的 WRONGTYPE 恢复竞态（可并入方案 B）

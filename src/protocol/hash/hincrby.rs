@@ -4,14 +4,14 @@
 //! Increments the integer value of a field in a hash by a number.
 //! Uses 0 as initial value if the field doesn't exist.
 
-use rockraft::raft::types::UpsertKV;
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, backoff_delay, now_ms};
 use async_trait::async_trait;
 
 /// Parsed HINCRBY arguments
@@ -65,12 +65,6 @@ impl HIncrByCommand {
       increment,
     })
   }
-
-  /// Parse a byte array to i64
-  fn parse_value_to_i64(data: &[u8]) -> Result<i64, ()> {
-    let s = String::from_utf8_lossy(data);
-    s.parse::<i64>().map_err(|_| ())
-  }
 }
 
 #[async_trait]
@@ -79,85 +73,101 @@ impl Command for HIncrByCommand {
     // Parse arguments
     let args = Self::parse_args(items)?;
 
-    // Get or create metadata
-    let mut metadata = match server.get(&args.key).await? {
-      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
-        Ok(meta) => {
-          // Check if expired
-          if meta.is_expired(now_ms()) {
-            // Expired, treat as new
-            HashMetadata::new()
-          } else {
-            meta
+    let mut attempt = 0;
+    for _ in 0..MAX_CAS_RETRIES {
+      let raw_meta = server.get(&args.key).await?;
+      let metadata = match &raw_meta {
+        Some(bytes) => match HashMetadata::deserialize(bytes) {
+          Ok(meta) if !meta.is_expired(now_ms()) => Some(meta),
+          // Expired hashes count as absent; the CAS still pins their bytes so
+          // the metadata write only lands if nothing recreated the key.
+          _ => None,
+        },
+        None => None,
+      };
+
+      let version = metadata.as_ref().map_or_else(
+        || {
+          let fresh = HashMetadata::new();
+          fresh.version
+        },
+        |meta| meta.version,
+      );
+      let sub_key_str =
+        HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &args.field);
+
+      let raw_field = server.get(&sub_key_str).await?;
+      let current_value = decode_current_i64(raw_field.clone())?;
+
+      let new_value = current_value
+        .checked_add(args.increment)
+        .ok_or(ProtocolError::Overflow)?;
+
+      let new_metadata = match &metadata {
+        Some(meta) => {
+          let mut m = meta.clone();
+          if raw_field.is_none() {
+            m.incr_size();
           }
+          m
         }
-        Err(_) => {
-          // Corrupted, create new
-          HashMetadata::new()
+        None => {
+          let mut m = HashMetadata::new();
+          m.version = version;
+          m.incr_size();
+          m
         }
-      },
-      None => {
-        // Not found, create new
-        HashMetadata::new()
+      };
+
+      // Pin the observed state of both keys: the increment only lands if the
+      // metadata and the field value are unchanged at apply time.
+      let conditions = vec![
+        match &raw_meta {
+          None => TxnCondition::not_exists(&args.key),
+          Some(bytes) => TxnCondition::eq(&args.key, bytes),
+        },
+        match &raw_field {
+          None => TxnCondition::not_exists(&sub_key_str),
+          Some(bytes) => TxnCondition::eq(&sub_key_str, bytes),
+        },
+      ];
+
+      let entries = vec![
+        UpsertKV::insert(
+          &sub_key_str,
+          &HashFieldValue::new(new_value.to_string()).serialize(),
+        ),
+        UpsertKV::insert(&args.key, &new_metadata.serialize()),
+      ];
+
+      let req = TxnReq::new(conditions).if_then_ops(entries);
+      match server.txn(req).await? {
+        TxnReply::Success { branch: true, .. } => return Ok(Value::Integer(new_value)),
+        // Lost the race; back off (jittered, capped) so concurrent losers do
+        // not re-compete in lockstep, then re-observe.
+        _ => {
+          tokio::time::sleep(backoff_delay(attempt)).await;
+          attempt += 1;
+          continue;
+        }
       }
-    };
-
-    let version = metadata.version;
-
-    // Build the sub-key for this field
-    let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, &args.field);
-
-    // Get current value
-    let current_value: i64 = match server.get(&sub_key_str).await? {
-      Some(raw_value) => match HashFieldValue::deserialize(&raw_value) {
-        Ok(field_value) => {
-          // Parse current value as i64
-          match Self::parse_value_to_i64(&field_value.data) {
-            Ok(v) => v,
-            Err(_) => {
-              return Err(ProtocolError::Custom("ERR hash value is not an integer").into());
-            }
-          }
-        }
-        Err(_) => {
-          // Corrupted, treat as 0
-          0
-        }
-      },
-      None => {
-        // Field doesn't exist, start with 0
-        0
-      }
-    };
-
-    // Perform increment with overflow check
-    let new_value = current_value
-      .checked_add(args.increment)
-      .ok_or(ProtocolError::Overflow)?;
-
-    // Check if field is new
-    let field_exists = (server.get(&sub_key_str).await?).is_some();
-
-    // Prepare batch write entries
-    let mut entries: Vec<UpsertKV> = Vec::new();
-
-    // Update field value
-    let field_value = HashFieldValue::new(new_value.to_string());
-    entries.push(UpsertKV::insert(sub_key_str, &field_value.serialize()));
-
-    // Update metadata if this is a new field
-    if !field_exists {
-      metadata.incr_size();
     }
 
-    // Add metadata entry
-    entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
+    Err(ProtocolError::Custom("ERR hincrby retry limit exceeded").into())
+  }
+}
 
-    // Perform atomic batch write
-    server.batch_write(entries).await?;
-
-    // Return the new value
-    Ok(Value::Integer(new_value))
+fn decode_current_i64(raw_value: Option<Vec<u8>>) -> Result<i64, CoreDbError> {
+  match raw_value {
+    Some(bytes) => match HashFieldValue::deserialize(&bytes) {
+      Ok(field_value) => {
+        let s = String::from_utf8_lossy(&field_value.data);
+        s.parse::<i64>()
+          .map_err(|_| ProtocolError::Custom("ERR hash value is not an integer").into())
+      }
+      Err(_) => Err(ProtocolError::Custom("ERR hash value is not an integer").into()),
+    },
+    None => Ok(0),
   }
 }
 

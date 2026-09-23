@@ -1697,6 +1697,74 @@ class TestClusterHash(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_hincrby_concurrent_no_lost_updates(self) -> bool:
+        """Test that concurrent HINCRBY from many clients sums exactly.
+
+        This is the lost-update defect recorded in docs/bug.md section 1.1:
+        100 concurrent HINCRBY used to yield ~64-68 instead of 100.
+        """
+        print("\nTest: Concurrent HINCRBY (8 clients x 25, exact sum)")
+
+        import threading
+
+        test_key = "hincrby_concurrent_key"
+        num_clients = 8
+        increments_per_client = 25
+        expected = num_clients * increments_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        results = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for _ in range(increments_per_client):
+                    results.append(node.hincrby(test_key, "counter", 1))
+            except redis.RedisError as e:
+                errors.append(str(e))
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        # Every reply must be a distinct value 1..expected; no duplicates means
+        # no increment was applied twice (and none was lost).
+        if len(results) != expected:
+            print(f"\033[31m  FAILED: expected {expected} replies, got {len(results)}")
+            return False
+
+        duplicates = len(results) - len(set(results))
+        if duplicates != 0:
+            print(f"\033[31m  FAILED: {duplicates} duplicate HINCRBY replies "
+                  f"(values must be unique 1..{expected})")
+            return False
+
+        for i, node in enumerate(self.nodes, 1):
+            value = node.conn.hget(test_key, "counter")
+            if value != str(expected):
+                print(f"\033[31m  Node {i} FAILED: expected '{expected}', got '{value}'")
+                return False
+            print(f"    Node {i}: counter={value}")
+
+        print(f"  {num_clients} clients x {increments_per_client} concurrent HINCRBY")
+        print(f"  -> all {expected} replies distinct, final value {expected}: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_hash_ttl(self) -> bool:
         """Test TTL on hash key."""
         print("\nTest: Hash TTL")
@@ -1867,6 +1935,7 @@ class TestClusterHash(TestClusterBase):
             self.test_hincrby_overflow,
             self.test_hincrby_replication,
             self.test_hincrby_atomicity_consistency,
+            self.test_hincrby_concurrent_no_lost_updates,
             self.test_hash_ttl,
             self.test_hash_ttl_expired,
             self.test_chaos_hset_hget,

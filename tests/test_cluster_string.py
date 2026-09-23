@@ -2564,6 +2564,135 @@ class TestClusterString(TestClusterBase):
         
         print("\033[32m  PASSED\033[0m")
         return True
+
+    def test_append_concurrent_no_truncation(self) -> bool:
+        """Test that concurrent APPEND from many clients appends every byte.
+
+        This is the lost-update defect recorded in docs/bug.md section 1.2:
+        100 concurrent APPEND used to yield STRLEN 64 instead of 100.
+        """
+        print("\nTest: Concurrent APPEND (8 clients x 25, exact total length)")
+
+        import threading
+
+        test_key = "append_concurrent_key"
+        num_clients = 8
+        appends_per_client = 25
+        chunk = "x"
+        expected_len = num_clients * appends_per_client * len(chunk)
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        lengths = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for _ in range(appends_per_client):
+                    lengths.append(node.append(test_key, chunk))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(lengths) != num_clients * appends_per_client:
+            print(f"\033[31m  FAILED: expected {num_clients * appends_per_client} "
+                  f"replies, got {len(lengths)}")
+            return False
+
+        # Every reply must be distinct 1..expected_len: a repeated length would
+        # mean one APPEND overwrote another (truncation) instead of extending.
+        duplicates = len(lengths) - len(set(lengths))
+        if duplicates != 0:
+            print(f"\033[31m  FAILED: {duplicates} duplicate APPEND lengths "
+                  f"(lengths must be distinct 1..{expected_len})")
+            return False
+
+        for i, node in enumerate(self.nodes, 1):
+            value = node.conn.get(test_key)
+            if value is None or len(value) != expected_len:
+                print(f"\033[31m  Node {i} FAILED: expected STRLEN {expected_len}, "
+                      f"got {len(value) if value is not None else None}")
+                return False
+            if value != chunk * expected_len:
+                print(f"\033[31m  Node {i} FAILED: value corrupted "
+                      f"(expected {expected_len} x '{chunk}')")
+                return False
+            print(f"    Node {i}: STRLEN={len(value)}")
+
+        print(f"  {num_clients} clients x {appends_per_client} concurrent APPEND")
+        print(f"  -> {expected_len} distinct lengths 1..{expected_len}, "
+              f"content intact: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_append_on_expired_key(self) -> bool:
+        """Test APPEND as the first command on an expired key.
+
+        Regression: the CAS used to pin an expired key with `not_exists`,
+        but the conditional check only sees raw stored bytes and is blind
+        to TTL, so the condition never held and APPEND spun out its retry
+        budget (~59s then error) instead of starting a fresh string.
+        """
+        print("\nTest: APPEND on expired key (first command after expiry)")
+
+        test_key = "append_expired_key"
+        append_value = "fresh"
+        node = self._get_random_node()
+        node.delete(test_key)
+
+        node.set(test_key, "old-data", px=200)
+        if node.get(test_key) != "old-data":
+            print("\033[31m  FAILED: setup value missing before expiry")
+            return False
+
+        print("  Waiting for expiry (0.3s)...")
+        time.sleep(0.3)
+
+        result = node.append(test_key, append_value)
+        if result != len(append_value):
+            print(f"\033[31m  FAILED: expected STRLEN {len(append_value)}, got {result}")
+            return False
+
+        value = node.get(test_key)
+        if value != append_value:
+            print(f"\033[31m  FAILED: expected '{append_value}', got {value!r}")
+            return False
+
+        # A fresh key must not carry the expired key's old TTL.
+        ttl = node.pttl(test_key)
+        if ttl not in (-1, -2):
+            print(f"\033[31m  FAILED: expected fresh key without old TTL "
+                  f"(PTTL -1), got {ttl}")
+            return False
+
+        # A second APPEND must keep working on the re-created key.
+        result2 = node.append(test_key, "-more")
+        if result2 != len(append_value) + len("-more"):
+            print(f"\033[31m  FAILED: second APPEND expected "
+                  f"{len(append_value) + len('-more')}, got {result2}")
+            return False
+
+        print(f"  APPEND after expiry -> STRLEN {result}, value '{value}', "
+              f"then {result2} after second append: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
     
     def test_strlen_existing_key(self) -> bool:
         """Test STRLEN on an existing key."""
@@ -5523,6 +5652,8 @@ class TestClusterString(TestClusterBase):
             self.test_append_wrong_type,
             self.test_append_replication,
             self.test_append_preserves_expiration,
+            self.test_append_concurrent_no_truncation,
+            self.test_append_on_expired_key,
             self.test_strlen_existing_key,
             self.test_strlen_nonexistent_key,
             self.test_strlen_empty_string,

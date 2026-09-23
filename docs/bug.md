@@ -58,6 +58,21 @@ redis-cli STRLEN ap
 
 结果：**64**（期望 100）。
 
+**已修复**：APPEND 改为条件事务 CAS——以观察到的整值序列化字节作 `TxnCondition::eq`
+（不存在时 `not_exists`），apply 时值未变才追加；输者带退避重试
+（`src/protocol/string/append.rs`）。并发回归测试：
+`tests/test_cluster_string.py::test_append_concurrent_no_truncation`
+（8 客户端 × 25 次，要求长度 1..200 互异且内容完整）。
+
+**修复补丁的回归与再修**：首版 CAS 把「key 不存在」与「key 已过期」统一用
+`not_exists` 提交，但 rockraft 的条件判定只看原始存储字节、不感知 TTL——过期 key
+的字节仍在，条件永远为假，128 次重试全空转（实测客户端 ~59 秒后报
+`ERR append retry limit exceeded`）。已拆出 `Expired` 状态：过期 key 的字节用
+`TxnCondition::eq(key, 旧字节)` 锁定，apply 时写入**不带旧 TTL** 的全新字符串
+（Redis 语义：过期 key 视为不存在）。回归测试：
+`tests/test_cluster_string.py::test_append_on_expired_key`
+（SET PX → 过期后首个命令是 APPEND，校验值/TTL/二次追加）。
+
 ### 1.3 LPUSH：元素互相覆盖（数据真丢）
 
 ```bash

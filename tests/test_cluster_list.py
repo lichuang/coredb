@@ -847,6 +847,203 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_lpop_basic(self) -> bool:
+        """Test LPOP returns elements in head-to-tail order."""
+        print("\nTest: LPOP basic (FIFO order)")
+
+        key = "lpop_basic"
+        node = self._get_random_node()
+        node.delete(key)
+
+        node.rpush(key, "a", "b", "c")
+
+        if node.lpop(key) != "a":
+            print("\033[31m  FAILED: first LPOP expected 'a'")
+            return False
+        if node.lpop(key) != "b":
+            print("\033[31m  FAILED: second LPOP expected 'b'")
+            return False
+
+        remaining = node.lrange(key, 0, -1)
+        if remaining != ["c"]:
+            print(f"\033[31m  FAILED: expected ['c'], got {remaining}")
+            return False
+
+        print("  LPOP order a, b then ['c'] remains: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_rpop_basic(self) -> bool:
+        """Test RPOP returns elements in tail-to-head order."""
+        print("\nTest: RPOP basic (LIFO order)")
+
+        key = "rpop_basic"
+        node = self._get_random_node()
+        node.delete(key)
+
+        node.rpush(key, "a", "b", "c")
+
+        if node.rpop(key) != "c":
+            print("\033[31m  FAILED: first RPOP expected 'c'")
+            return False
+        if node.rpop(key) != "b":
+            print("\033[31m  FAILED: second RPOP expected 'b'")
+            return False
+
+        remaining = node.lrange(key, 0, -1)
+        if remaining != ["a"]:
+            print(f"\033[31m  FAILED: expected ['a'], got {remaining}")
+            return False
+
+        print("  RPOP order c, b then ['a'] remains: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_pop_empty_list(self) -> bool:
+        """Test LPOP/RPOP on empty and missing lists return nil."""
+        print("\nTest: LPOP/RPOP on empty or missing list")
+
+        key = "pop_empty_list"
+        node = self._get_random_node()
+        node.delete(key)
+
+        if node.lpop(key) is not None:
+            print("\033[31m  FAILED: LPOP on missing key should return None")
+            return False
+        if node.rpop(key) is not None:
+            print("\033[31m  FAILED: RPOP on missing key should return None")
+            return False
+
+        node.rpush(key, "only")
+        if node.lpop(key) != "only":
+            print("\033[31m  FAILED: LPOP expected 'only'")
+            return False
+        # List drained: the key must be gone, and further pops stay nil.
+        if node.llen(key) != 0:
+            print("\033[31m  FAILED: LLEN expected 0 after drain")
+            return False
+        if node.lpop(key) is not None or node.rpop(key) is not None:
+            print("\033[31m  FAILED: pops on drained list should return None")
+            return False
+
+        print("  nil on missing/drained list, key drained cleanly: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_pop_count_semantics(self) -> bool:
+        """Test LPOP/RPOP with count returns arrays and drains correctly."""
+        print("\nTest: LPOP/RPOP count semantics")
+
+        key = "pop_count_key"
+        node = self._get_random_node()
+        node.delete(key)
+
+        node.rpush(key, "1", "2", "3", "4", "5")
+
+        got = node.lpop(key, count=2)
+        if got != ["1", "2"]:
+            print(f"\033[31m  FAILED: LPOP count=2 expected ['1','2'], got {got}")
+            return False
+
+        got = node.rpop(key, count=2)
+        if got != ["5", "4"]:
+            print(f"\033[31m  FAILED: RPOP count=2 expected ['5','4'], got {got}")
+            return False
+
+        got = node.lpop(key, count=10)
+        if got != ["3"]:
+            print(f"\033[31m  FAILED: LPOP count=10 on 1 element expected ['3'], got {got}")
+            return False
+
+        if node.exists(key):
+            print("\033[31m  FAILED: key should be deleted after draining")
+            return False
+
+        print("  count pops return arrays, over-count drains safely: OK")
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_pop_concurrent_no_duplicate_delivery(self) -> bool:
+        """Test that concurrent LPOP/RPOP deliver every element exactly once.
+
+        This is the defect recorded in docs/bug.md section 1.3: two pops
+        reading the same metadata used to return (and delete) the same
+        element — one delivered twice while another was never returned.
+        """
+        print("\nTest: Concurrent LPOP/RPOP (8 clients over 200 elements)")
+
+        import threading
+
+        test_key = "pop_concurrent_key"
+        num_clients = 8
+        total_elements = 200
+
+        node = self._get_random_node()
+        node.delete(test_key)
+
+        elements = [f"elem-{i}" for i in range(total_elements)]
+        node.rpush(test_key, *elements)
+
+        delivered = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                conn = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for _ in range(total_elements // num_clients):
+                    if client_id % 2 == 0:
+                        value = conn.lpop(test_key)
+                    else:
+                        value = conn.rpop(test_key)
+                    if value is not None:
+                        delivered.append(value)
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(delivered) != total_elements:
+            print(f"\033[31m  FAILED: expected {total_elements} deliveries, got {len(delivered)}")
+            return False
+
+        # Every element must be delivered exactly once: a duplicate means one
+        # element was delivered twice while another was lost.
+        duplicates = len(delivered) - len(set(delivered))
+        if duplicates != 0:
+            print(f"\033[31m  FAILED: {duplicates} duplicate deliveries "
+                  f"(each element must be delivered exactly once)")
+            return False
+
+        if set(delivered) != set(elements):
+            print(f"\033[31m  FAILED: delivered set mismatch with pushed set")
+            return False
+
+        for i, n in enumerate(self.nodes, 1):
+            llen = n.conn.llen(test_key)
+            if llen != 0:
+                print(f"\033[31m  Node {i} FAILED: LLEN expected 0 after drain, got {llen}")
+                return False
+            print(f"    Node {i}: LLEN=0 after drain: OK")
+
+        print(f"  {num_clients} clients popping {total_elements} elements "
+              f"(mixed LPOP/RPOP)")
+        print(f"  -> every element delivered exactly once, all nodes drained: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_llen_wrong_type(self) -> bool:
         """Test LLEN on a key holding wrong type returns WRONGTYPE error."""
         print("\nTest: LLEN wrong type error")
@@ -1893,6 +2090,11 @@ class TestClusterList(TestClusterBase):
             self.test_llen_nonexistent_key,
             self.test_llen_after_push,
             self.test_llen_after_pop,
+            self.test_lpop_basic,
+            self.test_rpop_basic,
+            self.test_pop_empty_list,
+            self.test_pop_count_semantics,
+            self.test_pop_concurrent_no_duplicate_delivery,
             self.test_llen_wrong_type,
             self.test_lrange_nonexistent_key,
             self.test_lrange_full_list,

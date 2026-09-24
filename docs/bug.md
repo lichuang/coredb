@@ -19,7 +19,7 @@ CoreDB 存在**系统性**的并发正确性问题：所有"先读 metadata → 
 | 🔴 高 | `HINCRBY` | 100 并发 → 结果 64~68（丢失 ~35%） | ✅ 已修复 |
 | 🔴 高 | `APPEND` | 100 并发 → 长度 64（丢失 ~36%） | ✅ 已修复 |
 | 🔴 高 | `LPUSH` / `RPUSH` | 50 并发 → 元素 22（丢失 ~56%，数据真丢） | 🔶 LPUSH 已修复 / RPUSH ⬜ |
-| 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 | ⬜ 未修复 |
+| 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 | ✅ 已修复 |
 | 🟠 中 | `ZADD` | 50 并发 → 48 个成员（丢失成员） | ⬜ 未修复 |
 | 🟠 中 | `ZREM` | 同 ZADD 模式 | ⬜ 未修复 |
 | 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） | ⬜ 未修复 |
@@ -100,6 +100,17 @@ redis-cli LRANGE lp2 0 -1 | wc -l   # -> 22
 （旧子键不可达，同 APPEND 的 TTL 盲区处理）。并发回归测试：
 `tests/test_cluster_list.py::test_lpush_concurrent_no_loss`
 （8 客户端 × 25 次，要求长度 1..200 互异、LLEN/LRANGE 一致、200 个元素无一丢失）。
+
+**LPOP/RPOP 已修复**：与 LPUSH 同源（同一 metadata 的 `head`/`tail` 游标被并发
+读取 → 弹出并删除同一子键 → 一个元素被投递两次而另一个从未返回）。修法：
+以观察到的 metadata 字节作 `TxnCondition::eq`，apply 时 metadata 未变才删除
+子键并推进游标——**同一 metadata 只可能有一个胜者**，故每元素恰被投递一次；
+元素子键在条件与 apply 之间被并发 pop 删除时（metadata 已变），按陈旧状态
+重试而非弹出空值。列表弹空时删除 metadata 键（同一 `eq` 条件覆盖覆盖写与
+删除两种路径）。过期/空/损坏 → 直接 nil（无可竞争的状态）。混合 LPOP/RPOP
+并发回归测试：`tests/test_cluster_list.py::test_pop_concurrent_no_duplicate_delivery`
+（200 元素、8 客户端混合 LPOP/RPOP，要求投递集与推送集完全一致、无重复、
+全节点 LLEN=0）。
 
 ### 1.4 ZADD：丢失成员
 
@@ -203,8 +214,8 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `src/protocol/set/sadd.rs` | `:49`, `:73` | `:86` |
 | `src/protocol/set/srem.rs` | 同模式 | 同模式 |
 | `src/protocol/zset/zrem.rs` | 同模式 | 同模式 |
-| `src/protocol/list/lpop.rs` | `:66`, `:94` | `:119` |
-| `src/protocol/list/rpop.rs` | 同模式 | 同模式 |
+| `src/protocol/list/lpop.rs` | `:66`, `:94` | `:119` | ✅ 已修复（§1.3 LPOP/RPOP） |
+| `src/protocol/list/rpop.rs` | 同模式 | 同模式 | ✅ 已修复（§1.3 LPOP/RPOP） |
 | `src/protocol/list/lrem.rs` | 同模式 | 同模式 |
 | `src/protocol/list/lset.rs` | 同模式 | 同模式 |
 | `src/protocol/bitmap/setbit.rs` | `:117`, `:140` | `:157` |
@@ -230,6 +241,7 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `HINCRBY` | CAS 同时锁定 metadata 与 field 子键 | `src/protocol/hash/hincrby.rs` |
 | `APPEND` | CAS 锁定整值序列化字节；过期 key 用 `eq` 锁旧字节（TTL 盲区） | `src/protocol/string/append.rs` |
 | `LPUSH` | CAS 锁定 metadata 字节（head 游标派生子键索引，胜者索引唯一）；过期 list 用 `eq` 锁旧字节 | `src/protocol/list/lpush.rs` |
+| `LPOP` / `RPOP` | CAS 锁定 metadata 字节（同一 metadata 仅一个胜者，每元素恰投递一次）；子键缺失按陈旧状态重试；弹空删 metadata 键（同一条件覆盖两条路径） | `src/protocol/list/lpop.rs`, `rpop.rs` |
 
 > ⚠️ **参考时须注意**：`atomic_incr` 的 CAS 重试在**热点 key 下会耗尽上限**（实测 100 并发打同一 key，2000 次请求仅约 60 次成功，其余报 `ERR increment retry limit exceeded`）。这是"每个重试都是完整读+事务往返"的固有代价——冲突概率 ≈ 1/N，N 个并发客户端需要 N 次重试。
 >
@@ -343,7 +355,7 @@ redis-cli -p 16679 LLEN lp2       # 实测 ~22
 
 ## 7. 待办
 
-- [ ] 实测 `LPOP`/`RPOP`/`LREM`/`LSET`/`HDEL`/`SREM`/`ZREM` 的具体丢失率
+- [ ] 实测 `LREM`/`LSET`/`HDEL`/`SREM`/`ZREM` 的具体丢失率（`LPOP`/`RPOP` 已修复）
 - [ ] 实测 `GETSET` 对非 string 旧值的并发覆盖（§3.3 的恢复竞态）
 - [ ] 设计并实现统一 `atomic_mutate` helper（方案 B），**同步改进重试策略（退避 + jitter）**
 - [ ] 逐个迁移受影响命令

@@ -1,11 +1,25 @@
-use rockraft::raft::types::UpsertKV;
+//! LPOP command implementation
+//!
+//! LPOP key [count]
+//! Removes and returns the first elements of the list stored at key.
+//! Without `count` returns a single bulk string (nil when empty);
+//! with `count` returns an array.
+//!
+//! Concurrency: the popped sub-key indexes are derived from the metadata's
+//! `head` cursor, so two concurrent pops reading the same metadata would
+//! return (and delete) the same element — one element delivered twice while
+//! another is never returned (docs/bug.md §1.3). The read-modify-write is
+//! therefore guarded by a conditional transaction that pins the observed
+//! metadata bytes; losers re-read and retry with capped, jittered backoff.
+
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 use crate::encoding::{ListElementValue, ListMetadata, TYPE_LIST};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, backoff_delay, now_ms};
 use async_trait::async_trait;
 
 pub struct LPopCommand;
@@ -58,73 +72,123 @@ impl LPopCommand {
   }
 }
 
+/// The current list state observed for the target key.
+enum CurrentList {
+  /// Key absent, expired, corrupt, or empty: nothing to pop (nil reply).
+  Empty,
+  /// Present, unexpired, and a non-empty list; carries its serialized
+  /// metadata bytes.
+  List {
+    raw: Vec<u8>,
+    metadata: ListMetadata,
+  },
+  /// Present but not a list value: report WRONGTYPE instead of reading it.
+  Other,
+}
+
+async fn observe_current(server: &Server, key: &str) -> Result<CurrentList, CoreDbError> {
+  let raw = match server.get(key).await? {
+    Some(bytes) => bytes,
+    None => return Ok(CurrentList::Empty),
+  };
+
+  match ListMetadata::deserialize(&raw) {
+    Ok(meta) if meta.get_type() != TYPE_LIST => Ok(CurrentList::Other),
+    Ok(meta) if meta.is_expired(now_ms()) || meta.size == 0 => Ok(CurrentList::Empty),
+    Ok(meta) => Ok(CurrentList::List {
+      raw,
+      metadata: meta,
+    }),
+    Err(_) => Ok(CurrentList::Empty),
+  }
+}
+
 #[async_trait]
 impl Command for LPopCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let args = Self::parse_args(items)?;
 
-    let metadata = match server.get(&args.key).await? {
-      Some(raw_meta) => match ListMetadata::deserialize(&raw_meta) {
-        Ok(meta) => {
-          if meta.get_type() != TYPE_LIST {
-            return Err(ProtocolError::WrongType.into());
-          }
-          if meta.is_expired(now_ms()) {
-            return Ok(Value::BulkString(None));
-          }
-          meta
+    for attempt in 0..MAX_CAS_RETRIES {
+      let (raw_meta, metadata) = match observe_current(server, &args.key).await? {
+        CurrentList::Other => return Err(ProtocolError::WrongType.into()),
+        CurrentList::Empty => return Ok(Value::BulkString(None)),
+        CurrentList::List { raw, metadata } => (raw, metadata),
+      };
+
+      let pop_count = args.count.unwrap_or(1).min(metadata.size);
+      let version = metadata.version;
+      let head = metadata.head;
+
+      // Read the payloads of the elements to pop. The condition pins the
+      // metadata, so these sub-keys are ours to delete iff the metadata is
+      // unchanged at apply time.
+      let mut results: Vec<Value> = Vec::with_capacity(pop_count as usize);
+      for i in 0..pop_count {
+        let sub_key_str =
+          ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, head + i);
+        match server.get(&sub_key_str).await? {
+          Some(raw_elem) => match ListElementValue::deserialize(&raw_elem) {
+            Ok(elem) => results.push(Value::BulkString(Some(elem.data))),
+            Err(_) => break,
+          },
+          // The sub-key is gone while the metadata still claims it: the list
+          // changed under us; re-observe instead of popping nothing.
+          None => break,
         }
-        Err(_) => return Ok(Value::BulkString(None)),
-      },
-      None => return Ok(Value::BulkString(None)),
-    };
-
-    if metadata.size == 0 {
-      return Ok(Value::BulkString(None));
-    }
-
-    let pop_count = args.count.unwrap_or(1).min(metadata.size);
-    let version = metadata.version;
-    let mut head = metadata.head;
-    let mut entries: Vec<UpsertKV> = Vec::with_capacity(pop_count as usize + 1);
-    let mut results: Vec<Value> = Vec::with_capacity(pop_count as usize);
-
-    for _ in 0..pop_count {
-      let sub_key_str = ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, head);
-      match server.get(&sub_key_str).await? {
-        Some(raw_elem) => match ListElementValue::deserialize(&raw_elem) {
-          Ok(elem) => {
-            results.push(Value::BulkString(Some(elem.data)));
-            entries.push(UpsertKV::delete(sub_key_str));
-          }
-          Err(_) => break,
-        },
-        None => break,
       }
-      head += 1;
-    }
 
-    let actual_popped = results.len() as u64;
-    let new_size = metadata.size - actual_popped;
+      if results.is_empty() {
+        tokio::time::sleep(backoff_delay(attempt)).await;
+        continue;
+      }
 
-    if new_size == 0 {
-      entries.push(UpsertKV::delete(args.key.clone()));
-    } else {
+      let actual_popped = results.len() as u64;
+      let new_size = metadata.size - actual_popped;
+
+      let mut entries: Vec<UpsertKV> = Vec::with_capacity(actual_popped as usize + 1);
+      for i in 0..actual_popped {
+        let sub_key_str =
+          ListElementValue::build_sub_key_hex(args.key.as_bytes(), version, head + i);
+        entries.push(UpsertKV::delete(sub_key_str));
+      }
+
       let mut new_meta = metadata.clone();
-      new_meta.head = head;
+      new_meta.head = head + actual_popped;
       new_meta.size = new_size;
-      entries.push(UpsertKV::insert(args.key.clone(), &new_meta.serialize()));
+      if new_size == 0 {
+        // List drained: drop the metadata key entirely.
+        entries.push(UpsertKV::delete(args.key.clone()));
+      } else {
+        entries.push(UpsertKV::insert(args.key.clone(), &new_meta.serialize()));
+      }
+
+      // Whether we overwrite the metadata or delete it, the transaction only
+      // applies if the observed metadata bytes are unchanged.
+      let condition = TxnCondition::eq(&args.key, &raw_meta);
+      let reply = server
+        .txn(TxnReq::new(vec![condition]).if_then_ops(entries))
+        .await?;
+
+      match reply {
+        TxnReply::Success { branch: true, .. } => {
+          return Ok(match args.count {
+            None => results
+              .into_iter()
+              .next()
+              .unwrap_or(Value::BulkString(None)),
+            Some(_) => Value::Array(Some(results)),
+          });
+        }
+        // Lost the race; back off (jittered, capped) so concurrent losers do
+        // not re-compete in lockstep, then re-observe.
+        _ => {
+          tokio::time::sleep(backoff_delay(attempt)).await;
+          continue;
+        }
+      }
     }
 
-    server.batch_write(entries).await?;
-
-    Ok(match args.count {
-      None => results
-        .into_iter()
-        .next()
-        .unwrap_or(Value::BulkString(None)),
-      Some(_) => Value::Array(Some(results)),
-    })
+    Err(ProtocolError::Custom("ERR lpop retry limit exceeded").into())
   }
 }
 

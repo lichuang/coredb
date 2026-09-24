@@ -14,17 +14,19 @@ CoreDB 存在**系统性**的并发正确性问题：所有"先读 metadata → 
 
 这是 issue #1 所描述问题的**同类根因**，但波及范围远大于 issue 中提到的 `SET NX`——hash / list / zset / set / bitmap / string 全部受影响。
 
-| 严重度 | 命令 | 实测现象 |
-|---|---|---|
-| 🔴 高 | `HINCRBY` | 100 并发 → 结果 64~68（丢失 ~35%） |
-| 🔴 高 | `APPEND` | 100 并发 → 长度 64（丢失 ~36%） |
-| 🔴 高 | `LPUSH` / `RPUSH` | 50 并发 → 元素 22（丢失 ~56%，数据真丢） |
-| 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 |
-| 🟠 中 | `ZADD` | 50 并发 → 48 个成员（丢失成员） |
-| 🟠 中 | `ZREM` | 同 ZADD 模式 |
-| 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） |
-| 🟠 中 | `SADD` / `SREM` / `SETBIT` | 元数据 `size` 计数错乱 |
-| 🟡 低 | `LREM` / `LSET` / `EXPIRE` / `RENAME` / `GETSET` | 同模式，受影响程度待实测 |
+| 严重度 | 命令 | 实测现象 | 状态 |
+|---|---|---|---|
+| 🔴 高 | `HINCRBY` | 100 并发 → 结果 64~68（丢失 ~35%） | ✅ 已修复 |
+| 🔴 高 | `APPEND` | 100 并发 → 长度 64（丢失 ~36%） | ✅ 已修复 |
+| 🔴 高 | `LPUSH` / `RPUSH` | 50 并发 → 元素 22（丢失 ~56%，数据真丢） | 🔶 LPUSH 已修复 / RPUSH ⬜ |
+| 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 | ⬜ 未修复 |
+| 🟠 中 | `ZADD` | 50 并发 → 48 个成员（丢失成员） | ⬜ 未修复 |
+| 🟠 中 | `ZREM` | 同 ZADD 模式 | ⬜ 未修复 |
+| 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） | ⬜ 未修复 |
+| 🟠 中 | `SADD` / `SREM` / `SETBIT` | 元数据 `size` 计数错乱 | ⬜ 未修复 |
+| 🟡 低 | `LREM` / `LSET` / `EXPIRE` / `RENAME` / `GETSET` | 同模式，受影响程度待实测 | ⬜ 未修复 |
+
+> 已修复命令的详情见各 §1.x 小节与 §3.4 参考实现表。
 
 ---
 
@@ -47,6 +49,12 @@ redis-cli HGET hc f
 | run 3 | 100 | **68** |
 
 稳定性复现，丢失率约 32~36%。
+
+**已修复**：HINCRBY 改为条件事务 CAS——同时锁定 hash metadata（`eq`/`not_exists`）与
+field 子键（`eq`/`not_exists`），apply 时两者均未变才写入；输者带退避重试
+（`src/protocol/hash/hincrby.rs`）。并发回归测试：
+`tests/test_cluster_hash.py::test_hincrby_concurrent_no_lost_updates`
+（8 客户端 × 25 次，要求 200 个回复互异 1..200）。
 
 ### 1.2 APPEND：丢失更新（数据截断）
 
@@ -83,6 +91,15 @@ redis-cli LRANGE lp2 0 -1 | wc -l   # -> 22
 ```
 
 `LLEN` 与 `LRANGE` 一致为 22，说明**元素确实丢失**，不是计数错误。
+
+**已修复**：LPUSH 改为条件事务 CAS——以观察到的 metadata 序列化字节作
+`TxnCondition::eq`（不存在时 `not_exists`），apply 时 metadata 未变才写入；
+输者带退避重试（`src/protocol/list/lpush.rs`）。锁定 metadata 即锁定 `head`
+游标：**胜者的 head 索引从未被其他成功 push 使用过（head 只减不增）**，
+故子键覆盖不可能发生。过期 list 用 `eq` 锁旧字节、新 list 带新 `version`
+（旧子键不可达，同 APPEND 的 TTL 盲区处理）。并发回归测试：
+`tests/test_cluster_list.py::test_lpush_concurrent_no_loss`
+（8 客户端 × 25 次，要求长度 1..200 互异、LLEN/LRANGE 一致、200 个元素无一丢失）。
 
 ### 1.4 ZADD：丢失成员
 
@@ -168,13 +185,13 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 
 ### 3.1 已确认丢失更新（实测）
 
-| 文件 | 读 | 写 | 类型 |
-|---|---|---|---|
-| `src/protocol/hash/hincrby.rs` | `:83`, `:111`, `:139` | `:157` | 数值丢失 |
-| `src/protocol/string/append.rs` | `:56` | `:67`, `:82`, `:95` | 数据截断 |
-| `src/protocol/list/lpush.rs` | `:71` | `:121` | 元素覆盖 |
-| `src/protocol/list/rpush.rs` | 同模式 | 同模式 | 元素覆盖 |
-| `src/protocol/zset/zadd.rs` | `:146`, `:171` | `:218` | 成员丢失 |
+| 文件 | 读 | 写 | 类型 | 状态 |
+|---|---|---|---|---|
+| `src/protocol/hash/hincrby.rs` | `:83`, `:111`, `:139` | `:157` | 数值丢失 | ✅ 已修复（§1.1） |
+| `src/protocol/string/append.rs` | `:56` | `:67`, `:82`, `:95` | 数据截断 | ✅ 已修复（§1.2） |
+| `src/protocol/list/lpush.rs` | `:71` | `:121` | 元素覆盖 | ✅ 已修复（§1.3） |
+| `src/protocol/list/rpush.rs` | 同模式 | 同模式 | 元素覆盖 | ⬜ 未修复 |
+| `src/protocol/zset/zadd.rs` | `:146`, `:171` | `:218` | 成员丢失 | ⬜ 未修复 |
 
 ### 3.2 同模式，疑似受影响（未逐一实测）
 
@@ -210,6 +227,9 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 |---|---|---|
 | `SET NX` / `SET XX` / `SETNX` | `TxnCondition` 条件事务 + CAS 重试 | `src/protocol/string/set.rs`, `setnx.rs` |
 | `INCR` / `INCRBY` / `DECR` / `DECRBY` | 应用层 CAS（`TxnCondition::eq` + `if_then`） | `src/protocol/string/atomic_incr.rs` |
+| `HINCRBY` | CAS 同时锁定 metadata 与 field 子键 | `src/protocol/hash/hincrby.rs` |
+| `APPEND` | CAS 锁定整值序列化字节；过期 key 用 `eq` 锁旧字节（TTL 盲区） | `src/protocol/string/append.rs` |
+| `LPUSH` | CAS 锁定 metadata 字节（head 游标派生子键索引，胜者索引唯一）；过期 list 用 `eq` 锁旧字节 | `src/protocol/list/lpush.rs` |
 
 > ⚠️ **参考时须注意**：`atomic_incr` 的 CAS 重试在**热点 key 下会耗尽上限**（实测 100 并发打同一 key，2000 次请求仅约 60 次成功，其余报 `ERR increment retry limit exceeded`）。这是"每个重试都是完整读+事务往返"的固有代价——冲突概率 ≈ 1/N，N 个并发客户端需要 N 次重试。
 >
@@ -330,3 +350,8 @@ redis-cli -p 16679 LLEN lp2       # 实测 ~22
 - [ ] 为每类命令补充并发集成测试（参照 `test_set_nx_concurrent_atomicity`）
 - [ ] 评估是否将原子 RMW 下沉到 rockraft（方案 C），规避此前 TxnIncr 的两个实现错误
 - [ ] 修复 `GETSET` 的 WRONGTYPE 恢复竞态（可并入方案 B）
+- [ ] 评估 rockraft 条件事务的 TTL 感知：`TxnCondition::not_exists` 对「过期视为不存在」
+      的 CAS 不成立（APPEND 修复时踩坑），后续 HSET/LPUSH 等修复会重复遇到——
+      可在 `TxnOp` 增加 `NotExistsOrExpired`，或让条件判定感知 `expires_at`
+- [ ] 评估 CAS 重试上限与热点 key 的可用性悬崖（§3.4 警告：100 并发仅约 60 次成功），
+      APPEND/HINCRBY 的退避策略（`util/cas.rs`）应随方案 B 统一回迁

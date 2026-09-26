@@ -379,6 +379,95 @@ class TestClusterZSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_zadd_concurrent_no_member_loss(self) -> bool:
+        """Test that concurrent ZADD from many clients keeps every member.
+
+        This is the defect recorded in docs/bug.md section 1.4: 50 concurrent
+        ZADD used to yield 48 members — racing writers wrote
+        `size = read_size + 1` back, and writers landing on different
+        milliseconds filed members into different version spaces that the
+        surviving metadata made invisible to scans.
+        """
+        print("\nTest: Concurrent ZADD (8 clients x 25, no member loss)")
+
+        import threading
+
+        test_key = "zadd_concurrent_key"
+        num_clients = 8
+        adds_per_client = 25
+        expected = num_clients * adds_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        results = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for i in range(adds_per_client):
+                    member = f"m{client_id}-{i}"
+                    score = client_id * adds_per_client + i
+                    added = node.zadd(test_key, {member: score})
+                    results.append((member, score, added))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(results) != expected:
+            print(f"\033[31m  FAILED: expected {expected} replies, got {len(results)}")
+            return False
+
+        # Every reply must report added=1: a 0 would mean the member already
+        # existed (impossible with unique members) or was lost and re-added.
+        wrong_added = [(m, a) for m, s, a in results if a != 1]
+        if wrong_added:
+            print(f"\033[31m  FAILED: {len(wrong_added)} replies with added != 1: "
+                  f"{wrong_added[:3]}")
+            return False
+
+        # Scores must match exactly what each client sent: a score drift
+        # would mean one writer's member was overwritten by another. ZRANGE
+        # scans member sub-keys, so this also proves no member was filed
+        # into an invisible version space.
+        expected_map = {m: s for m, s, _ in results}
+        for i, node in enumerate(self.nodes, 1):
+            actual = node.conn.zrange(test_key, 0, -1, withscores=True)
+            actual_map = {m: int(s) for m, s in actual}
+            if len(actual) != expected:
+                print(f"\033[31m  Node {i} FAILED: ZRANGE returned {len(actual)} "
+                      f"of {expected} members")
+                return False
+            if actual_map != expected_map:
+                missing = set(expected_map) - set(actual_map)
+                drifted = {m: (expected_map[m], actual_map.get(m))
+                           for m in expected_map
+                           if m in actual_map and actual_map[m] != expected_map[m]}
+                print(f"\033[31m  Node {i} FAILED: missing {sorted(missing)[:3]}, "
+                      f"score drift {dict(list(drifted.items())[:3])}")
+                return False
+            print(f"    Node {i}: {len(actual)} members with exact scores: OK")
+
+        print(f"  {num_clients} clients x {adds_per_client} concurrent ZADD")
+        print(f"  -> {expected} members, every reply added=1, scores exact: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_zadd_empty_member(self) -> bool:
         """Test ZADD with empty string member."""
         print("\nTest: ZADD empty member")
@@ -1309,6 +1398,7 @@ class TestClusterZSet(TestClusterBase):
             self.test_zadd_wrong_type,
             self.test_zadd_negative_score,
             self.test_zadd_replication,
+            self.test_zadd_concurrent_no_member_loss,
             self.test_zadd_empty_member,
             self.test_zadd_large_number_of_members,
             self.test_zadd_special_characters,

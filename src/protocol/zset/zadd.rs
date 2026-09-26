@@ -1,11 +1,28 @@
-use rockraft::raft::types::UpsertKV;
+//! ZADD command implementation
+//!
+//! ZADD key [NX|XX] [GT|LT] [CH] [INCR] score member [score member ...]
+//! Adds all the specified members with the specified scores to the sorted
+//! set stored at key.
+//!
+//! Concurrency: the member sub-key space is qualified by the metadata's
+//! `version`, which is a millisecond timestamp regenerated when a key is
+//! (re)created. Concurrent ZADDs that read the same metadata would each
+//! write `size = read_size + 1` back — losing members from the count — and
+//! worse, writers landing on different milliseconds would file members into
+//! different version spaces while only the last metadata survives, making
+//! those members invisible to scans (docs/bug.md §1.4). The read-modify-write
+//! is therefore guarded by a conditional transaction that pins the observed
+//! metadata bytes; losers re-read and retry with capped, jittered backoff,
+//! which also serializes version assignment.
+
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 use crate::encoding::{TYPE_ZSET, ZSetMemberValue, ZSetMetadata};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, backoff_delay, now_ms};
 use async_trait::async_trait;
 
 struct ZAddArgs {
@@ -138,90 +155,140 @@ impl ZAddCommand {
   }
 }
 
+/// The current zset state observed for the target key.
+enum CurrentZSet {
+  /// Key absent: push starts a fresh zset, guarded by `not_exists`.
+  Absent,
+  /// Present, unexpired, and a zset; carries its serialized metadata bytes.
+  ZSet {
+    raw: Vec<u8>,
+    metadata: ZSetMetadata,
+  },
+  /// Present but expired: logically absent, yet its bytes still sit in the
+  /// store, so the CAS must pin those bytes with `eq` — `not_exists` would
+  /// never hold and the command would spin out its retry budget. The fresh
+  /// zset gets a new version, so old member sub-keys become invisible.
+  Expired { raw: Vec<u8> },
+  /// Present but not a zset value: report WRONGTYPE instead of overwriting.
+  Other,
+}
+
+async fn observe_current(server: &Server, key: &str) -> Result<CurrentZSet, CoreDbError> {
+  let raw = match server.get(key).await? {
+    Some(bytes) => bytes,
+    None => return Ok(CurrentZSet::Absent),
+  };
+
+  match ZSetMetadata::deserialize(&raw) {
+    Ok(meta) if meta.get_type() != TYPE_ZSET => Ok(CurrentZSet::Other),
+    Ok(meta) if meta.is_expired(now_ms()) => Ok(CurrentZSet::Expired { raw }),
+    Ok(meta) => Ok(CurrentZSet::ZSet {
+      raw,
+      metadata: meta,
+    }),
+    Err(_) => Ok(CurrentZSet::Other),
+  }
+}
+
 #[async_trait]
 impl Command for ZAddCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let args = Self::parse_args(items)?;
 
-    let mut metadata = match server.get(&args.key).await? {
-      Some(raw_meta) => match ZSetMetadata::deserialize(&raw_meta) {
-        Ok(meta) => {
-          if meta.get_type() != TYPE_ZSET {
-            return Err(ProtocolError::WrongType.into());
-          }
-          if meta.is_expired(now_ms()) {
-            ZSetMetadata::new()
-          } else {
-            meta
-          }
+    for attempt in 0..MAX_CAS_RETRIES {
+      let (condition, mut metadata) = match observe_current(server, &args.key).await? {
+        CurrentZSet::Other => return Err(ProtocolError::WrongType.into()),
+        CurrentZSet::Absent => (TxnCondition::not_exists(&args.key), ZSetMetadata::new()),
+        // An expired zset reads as absent, but its bytes are still stored:
+        // pin them with `eq` (not_exists would never hold). The fresh zset
+        // carries a new version, so expired members stay unreachable.
+        CurrentZSet::Expired { raw } => {
+          let metadata = ZSetMetadata::new();
+          (TxnCondition::eq(&args.key, raw), metadata)
         }
-        Err(_) => ZSetMetadata::new(),
-      },
-      None => ZSetMetadata::new(),
-    };
-
-    let version = metadata.version;
-    let mut added_count = 0i64;
-    let mut updated_count = 0i64;
-    let mut entries: Vec<UpsertKV> = Vec::with_capacity(args.members.len() + 1);
-
-    for (member, score) in &args.members {
-      let sub_key_str = ZSetMemberValue::build_sub_key_hex(args.key.as_bytes(), version, member);
-
-      let member_exists = match server.get(&sub_key_str).await? {
-        Some(raw_val) => match ZSetMemberValue::deserialize(&raw_val) {
-          Ok(existing) => {
-            // NX: skip if already exists
-            if args.nx {
-              continue;
-            }
-
-            let score_changed = if args.gt {
-              *score > existing.score
-            } else if args.lt {
-              *score < existing.score
-            } else {
-              (existing.score - score).abs() > f64::EPSILON
-            };
-
-            if score_changed {
-              entries.push(UpsertKV::insert(
-                sub_key_str.clone(),
-                &ZSetMemberValue::new(*score).serialize(),
-              ));
-              updated_count += 1;
-            }
-            true
-          }
-          Err(_) => false,
-        },
-        None => false,
+        CurrentZSet::ZSet { raw, metadata } => (TxnCondition::eq(&args.key, raw), metadata),
       };
 
-      if !member_exists {
-        // XX: skip if does not exist
-        if args.xx {
+      let version = metadata.version;
+      let mut added_count = 0i64;
+      let mut updated_count = 0i64;
+      let mut entries: Vec<UpsertKV> = Vec::with_capacity(args.members.len() + 1);
+
+      for (member, score) in &args.members {
+        let sub_key_str = ZSetMemberValue::build_sub_key_hex(args.key.as_bytes(), version, member);
+
+        let member_exists = match server.get(&sub_key_str).await? {
+          Some(raw_val) => match ZSetMemberValue::deserialize(&raw_val) {
+            Ok(existing) => {
+              // NX: skip if already exists
+              if args.nx {
+                continue;
+              }
+
+              let score_changed = if args.gt {
+                *score > existing.score
+              } else if args.lt {
+                *score < existing.score
+              } else {
+                (existing.score - score).abs() > f64::EPSILON
+              };
+
+              if score_changed {
+                entries.push(UpsertKV::insert(
+                  sub_key_str.clone(),
+                  &ZSetMemberValue::new(*score).serialize(),
+                ));
+                updated_count += 1;
+              }
+              true
+            }
+            Err(_) => false,
+          },
+          None => false,
+        };
+
+        if !member_exists {
+          // XX: skip if does not exist
+          if args.xx {
+            continue;
+          }
+
+          entries.push(UpsertKV::insert(
+            sub_key_str,
+            &ZSetMemberValue::new(*score).serialize(),
+          ));
+          metadata.incr_size();
+          added_count += 1;
+        }
+      }
+
+      entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
+
+      // The condition pins the observed metadata bytes, which qualify the
+      // member sub-key space: the transaction only applies if nothing else
+      // has touched the zset, so version assignment is serialized.
+      let reply = server
+        .txn(TxnReq::new(vec![condition]).if_then_ops(entries))
+        .await?;
+
+      match reply {
+        TxnReply::Success { branch: true, .. } => {
+          return Ok(if args.ch {
+            Value::Integer(added_count + updated_count)
+          } else {
+            Value::Integer(added_count)
+          });
+        }
+        // Lost the race; back off (jittered, capped) so concurrent losers do
+        // not re-compete in lockstep, then re-observe.
+        _ => {
+          tokio::time::sleep(backoff_delay(attempt)).await;
           continue;
         }
-
-        entries.push(UpsertKV::insert(
-          sub_key_str,
-          &ZSetMemberValue::new(*score).serialize(),
-        ));
-        metadata.incr_size();
-        added_count += 1;
       }
     }
 
-    entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
-
-    server.batch_write(entries).await?;
-
-    Ok(if args.ch {
-      Value::Integer(added_count + updated_count)
-    } else {
-      Value::Integer(added_count)
-    })
+    Err(ProtocolError::Custom("ERR zadd retry limit exceeded").into())
   }
 }
 

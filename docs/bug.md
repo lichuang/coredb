@@ -21,7 +21,7 @@ CoreDB 存在**系统性**的并发正确性问题：所有"先读 metadata → 
 | 🔴 高 | `LPUSH` / `RPUSH` | 50 并发 → 元素 22（丢失 ~56%，数据真丢） | 🔶 LPUSH 已修复 / RPUSH ⬜ |
 | 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 | ✅ 已修复 |
 | 🟠 中 | `ZADD` | 50 并发 → 48 个成员（丢失成员） | ✅ 已修复 |
-| 🟠 中 | `ZREM` | 同 ZADD 模式 | ⬜ 未修复 |
+| 🟠 中 | `ZREM` | 同 ZADD 模式 | ✅ 已修复 |
 | 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） | ⬜ 未修复 |
 | 🟠 中 | `SADD` / `SREM` / `SETBIT` | 元数据 `size` 计数错乱 | ⬜ 未修复 |
 | 🟡 低 | `LREM` / `LSET` / `EXPIRE` / `RENAME` / `GETSET` | 同模式，受影响程度待实测 | ⬜ 未修复 |
@@ -218,24 +218,22 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `src/protocol/list/lpush.rs` | `:71` | `:121` | 元素覆盖 | ✅ 已修复（§1.3） |
 | `src/protocol/list/rpush.rs` | 同模式 | 同模式 | 元素覆盖 | ⬜ 未修复 |
 | `src/protocol/zset/zadd.rs` | `:146`, `:171` | `:218` | 成员丢失 | ✅ 已修复（§1.4） |
+| `src/protocol/zset/zrem.rs` | 同模式 | 同模式 | size 计数错乱 | ✅ 已修复（§1.4 ZREM） |
 
 ### 3.2 同模式，疑似受影响（未逐一实测）
 
-| 文件 | 读 | 写 |
-|---|---|---|
-| `src/protocol/hash/hset.rs` | `:84`, `:118` | `:135` |
-| `src/protocol/hash/hdel.rs` | 同模式 | 同模式 |
-| `src/protocol/hash/hsetnx.rs` | 同模式 | 同模式 |
-| `src/protocol/set/sadd.rs` | `:49`, `:73` | `:86` |
-| `src/protocol/set/srem.rs` | 同模式 | 同模式 |
-| `src/protocol/zset/zrem.rs` | 同模式 | 同模式 |
-| `src/protocol/list/lpop.rs` | `:66`, `:94` | `:119` | ✅ 已修复（§1.3 LPOP/RPOP） |
-| `src/protocol/list/rpop.rs` | 同模式 | 同模式 | ✅ 已修复（§1.3 LPOP/RPOP） |
-| `src/protocol/list/lrem.rs` | 同模式 | 同模式 |
-| `src/protocol/list/lset.rs` | 同模式 | 同模式 |
-| `src/protocol/bitmap/setbit.rs` | `:117`, `:140` | `:157` |
-| `src/protocol/key/expire.rs` / `pexpire.rs` | 读 TTL → 写回 | 同模式 |
-| `src/protocol/key/rename.rs` / `renamenx.rs` | 读源 → 批量搬移 | 同模式 |
+| 文件 | 读 | 写 | 状态 |
+|---|---|---|---|
+| `src/protocol/hash/hset.rs` | `:84`, `:118` | `:135` | ⬜ 未修复 |
+| `src/protocol/hash/hdel.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/hash/hsetnx.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/set/sadd.rs` | `:49`, `:73` | `:86` | ⬜ 未修复 |
+| `src/protocol/set/srem.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/list/lrem.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/list/lset.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/bitmap/setbit.rs` | `:117`, `:140` | `:157` | ⬜ 未修复 |
+| `src/protocol/key/expire.rs` / `pexpire.rs` | 读 TTL → 写回 | 同模式 | ⬜ 未修复 |
+| `src/protocol/key/rename.rs` / `renamenx.rs` | 读源 → 批量搬移 | 同模式 | ⬜ 未修复 |
 
 ### 3.3 已确认（写路径原子，但存在独立缺陷）
 
@@ -258,6 +256,7 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `LPUSH` | CAS 锁定 metadata 字节（head 游标派生子键索引，胜者索引唯一）；过期 list 用 `eq` 锁旧字节 | `src/protocol/list/lpush.rs` |
 | `LPOP` / `RPOP` | CAS 锁定 metadata 字节（同一 metadata 仅一个胜者，每元素恰投递一次）；子键缺失按陈旧状态重试；弹空删 metadata 键（同一条件覆盖两条路径） | `src/protocol/list/lpop.rs`, `rpop.rs` |
 | `ZADD` | CAS 锁定 metadata 字节（串行化 size 累加与 version 赋值，消除 version 隔离）；过期 zset 用 `eq` 锁旧字节 | `src/protocol/zset/zadd.rs` |
+| `ZREM` | CAS 锁定 metadata 字节（串行化 size 递减）；无竞争状态（过期/空）直接返 0 不进事务 | `src/protocol/zset/zrem.rs` |
 
 > ⚠️ **参考时须注意**：`atomic_incr` 的 CAS 重试在**热点 key 下会耗尽上限**（实测 100 并发打同一 key，2000 次请求仅约 60 次成功，其余报 `ERR increment retry limit exceeded`）。这是"每个重试都是完整读+事务往返"的固有代价——冲突概率 ≈ 1/N，N 个并发客户端需要 N 次重试。
 >

@@ -1,11 +1,24 @@
-use rockraft::raft::types::UpsertKV;
+//! ZREM command implementation
+//!
+//! ZREM key member [member ...]
+//! Removes the specified members from the sorted set stored at key.
+//! Returns the number of members actually removed.
+//!
+//! Concurrency: member removal decrements the metadata's `size`, so two
+//! concurrent ZREMs reading the same metadata would each write
+//! `size = read_size - removed` back — the last writer wins and the count
+//!(docs/bug.md §1.4, same pattern as ZADD). The read-modify-write is
+//! therefore guarded by a conditional transaction that pins the observed
+//! metadata bytes; losers re-read and retry with capped, jittered backoff.
+
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 use crate::encoding::{TYPE_ZSET, ZSetMemberValue, ZSetMetadata};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, backoff_delay, now_ms};
 use async_trait::async_trait;
 
 struct ZRemArgs {
@@ -41,50 +54,93 @@ impl ZRemCommand {
   }
 }
 
+/// The current zset state observed for the target key.
+enum CurrentZSet {
+  /// Key absent, expired, or corrupt: nothing to remove (0 reply).
+  Empty,
+  /// Present, unexpired, and a zset; carries its serialized metadata bytes.
+  ZSet {
+    raw: Vec<u8>,
+    metadata: ZSetMetadata,
+  },
+  /// Present but not a zset value: report WRONGTYPE instead of reading it.
+  Other,
+}
+
+async fn observe_current(server: &Server, key: &str) -> Result<CurrentZSet, CoreDbError> {
+  let raw = match server.get(key).await? {
+    Some(bytes) => bytes,
+    None => return Ok(CurrentZSet::Empty),
+  };
+
+  match ZSetMetadata::deserialize(&raw) {
+    Ok(meta) if meta.get_type() != TYPE_ZSET => Ok(CurrentZSet::Other),
+    Ok(meta) if meta.is_expired(now_ms()) || meta.size == 0 => Ok(CurrentZSet::Empty),
+    Ok(meta) => Ok(CurrentZSet::ZSet {
+      raw,
+      metadata: meta,
+    }),
+    Err(_) => Ok(CurrentZSet::Empty),
+  }
+}
+
 #[async_trait]
 impl Command for ZRemCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
     let args = Self::parse_args(items)?;
 
-    let mut metadata = match server.get(&args.key).await? {
-      Some(raw_meta) => match ZSetMetadata::deserialize(&raw_meta) {
-        Ok(meta) => {
-          if meta.get_type() != TYPE_ZSET {
-            return Err(ProtocolError::WrongType.into());
-          }
-          if meta.is_expired(now_ms()) {
-            return Ok(Value::Integer(0));
-          }
-          meta
+    for attempt in 0..MAX_CAS_RETRIES {
+      let (raw_meta, mut metadata) = match observe_current(server, &args.key).await? {
+        CurrentZSet::Other => return Err(ProtocolError::WrongType.into()),
+        // No removable state: expired/absent/corrupt/empty zsets lose
+        // nothing, so reply 0 without touching the key (no race window).
+        CurrentZSet::Empty => return Ok(Value::Integer(0)),
+        CurrentZSet::ZSet { raw, metadata } => (raw, metadata),
+      };
+
+      let version = metadata.version;
+      let mut removed_count = 0i64;
+      let mut entries: Vec<UpsertKV> = Vec::new();
+
+      for member in &args.members {
+        let sub_key_str = ZSetMemberValue::build_sub_key_hex(args.key.as_bytes(), version, member);
+
+        if let Ok(Some(_)) = server.get(&sub_key_str).await {
+          entries.push(UpsertKV::delete(sub_key_str));
+          removed_count += 1;
+          metadata.decr_size();
         }
-        Err(_) => return Ok(Value::Integer(0)),
-      },
-      None => return Ok(Value::Integer(0)),
-    };
+      }
 
-    let version = metadata.version;
-    let mut removed_count = 0i64;
-    let mut entries: Vec<UpsertKV> = Vec::new();
+      if removed_count == 0 {
+        // Nothing to remove: no writes happened, so reply 0 directly. The
+        // metadata is untouched and another writer may have changed it in
+        // the meantime; a fresh observation would give the same answer.
+        return Ok(Value::Integer(0));
+      }
 
-    for member in &args.members {
-      let sub_key_str = ZSetMemberValue::build_sub_key_hex(args.key.as_bytes(), version, member);
+      entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
-      if let Ok(Some(_)) = server.get(&sub_key_str).await {
-        entries.push(UpsertKV::delete(sub_key_str));
-        removed_count += 1;
-        metadata.decr_size();
+      // The condition pins the observed metadata bytes so the `size`
+      // decrement only lands if nothing else touched the zset at apply time.
+      let reply = server
+        .txn(TxnReq::new(vec![TxnCondition::eq(&args.key, &raw_meta)]).if_then_ops(entries))
+        .await?;
+
+      match reply {
+        TxnReply::Success { branch: true, .. } => {
+          return Ok(Value::Integer(removed_count));
+        }
+        // Lost the race; back off (jittered, capped) so concurrent losers do
+        // not re-compete in lockstep, then re-observe.
+        _ => {
+          tokio::time::sleep(backoff_delay(attempt)).await;
+          continue;
+        }
       }
     }
 
-    if removed_count == 0 {
-      return Ok(Value::Integer(0));
-    }
-
-    entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
-
-    server.batch_write(entries).await?;
-
-    Ok(Value::Integer(removed_count))
+    Err(ProtocolError::Custom("ERR zrem retry limit exceeded").into())
   }
 }
 

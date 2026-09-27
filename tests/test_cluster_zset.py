@@ -842,6 +842,97 @@ class TestClusterZSet(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_zrem_concurrent_no_count_corruption(self) -> bool:
+        """Test that concurrent ZREM from many clients removes every member.
+
+        This is the defect recorded in docs/bug.md section 1.4 (same pattern
+        as ZADD): concurrent ZREMs reading the same metadata each wrote
+        `size = read_size - removed` back, so the surviving size undercounted
+        and the removed count drifted.
+        """
+        print("\nTest: Concurrent ZREM (8 clients, distinct members, exact count)")
+
+        import threading
+
+        test_key = "zrem_concurrent_key"
+        num_clients = 8
+        members_per_client = 10
+        expected = num_clients * members_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        # ZADD all members first (concurrent ZADD is already CAS-fixed and
+        # tested separately; sequential here to make this test ZREM-only).
+        members = {f"m{c}-{i}": c * members_per_client + i
+                   for c in range(num_clients)
+                   for i in range(members_per_client)}
+        write_node.zadd(test_key, members)
+
+        results = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                client_members = [f"m{client_id}-{i}" for i in range(members_per_client)]
+                removed = node.zrem(test_key, *client_members)
+                results.append((client_id, client_members, removed))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(results) != num_clients:
+            print(f"\033[31m  FAILED: expected {num_clients} replies, got {len(results)}")
+            return False
+
+        # Every client must have removed exactly its own members_per_client.
+        wrong_removed = [(c, r) for c, ms, r in results if r != members_per_client]
+        if wrong_removed:
+            print(f"\033[31m  FAILED: {len(wrong_removed)} clients with removed != "
+                  f"{members_per_client}: {wrong_removed[:3]}")
+            return False
+
+        total_removed = sum(r for _, _, r in results)
+        if total_removed != expected:
+            print(f"\033[31m  FAILED: total removed {total_removed} != {expected}")
+            return False
+
+        # After removing every member, the zset must be empty everywhere and
+        # re-adding a member must report added=1.
+        for i, node in enumerate(self.nodes, 1):
+            remaining = node.conn.zrange(test_key, 0, -1, withscores=True)
+            if remaining:
+                print(f"\033[31m  Node {i} FAILED: {len(remaining)} members left "
+                      f"after removing all: {remaining[:3]}")
+                return False
+            print(f"    Node {i}: 0 members remain: OK")
+
+        re_added = write_node.zadd(test_key, {"after": 1.0})
+        if re_added != 1:
+            print(f"\033[31m  FAILED: ZADD after full removal expected 1, got {re_added}")
+            return False
+
+        print(f"  {num_clients} clients x {members_per_client} concurrent ZREM")
+        print(f"  -> {expected} removed with exact per-client counts, "
+              f"zset empty and reusable: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     # ==================== ZRANGE Tests ====================
 
     def test_zrange_basic(self) -> bool:
@@ -1413,6 +1504,7 @@ class TestClusterZSet(TestClusterBase):
             self.test_zrem_replication,
             self.test_zrem_all_members,
             self.test_zrem_atomicity_batch_consistency,
+            self.test_zrem_concurrent_no_count_corruption,
             self.test_zrange_basic,
             self.test_zrange_with_scores,
             self.test_zrange_subset,

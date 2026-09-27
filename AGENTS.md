@@ -282,19 +282,30 @@ cd tests
    - Place tests in `#[cfg(test)]` module at the bottom of the command file
 
 6. **Add Integration Tests** (REQUIRED):
-   - Create test methods in `tests/test_cluster_<type>.py`
-   - **MUST use redis-py standard API only** (e.g., `r.get()`, `r.hset()`, `r.set()`)
-   - **NEVER use `execute_command()`** to send raw commands - this bypasses redis-py's validation and may hide protocol incompatibilities
-   - Test basic functionality (e.g., SET/GET for string commands)
-   - Test edge cases (empty values, large values, special characters)
-   - Test error handling (wrong args, invalid inputs)
-   - Run `python run_all_tests.py` to verify all tests pass
+    - Create test methods in `tests/test_cluster_<type>.py`
+    - **MUST use redis-py standard API only** (e.g., `r.get()`, `r.hset()`, `r.set()`)
+    - **NEVER use `execute_command()`** to send raw commands - this bypasses redis-py's validation and may hide protocol incompatibilities
+    - Test basic functionality (e.g., SET/GET for string commands)
+    - Test edge cases (empty values, large values, special characters)
+    - Test error handling (wrong args, invalid inputs)
+    - Run `python run_all_tests.py` to verify all tests pass
 
-7. **Update README.md**: Mark command as ✅ in the commands table
+7. **Add Concurrency Tests** (REQUIRED for every write command):
+    - The `tests/` suite runs against a **3-node distributed cluster** (see `tests/start.sh` + `conf/node*.toml`); every write command must be proven correct under concurrency in this topology, not just sequentially
+    - Add a concurrent read/write test method (e.g., `test_<cmd>_concurrent_*`) alongside the basic tests:
+      - Multiple threads (typically 8) with a `threading.Barrier`, each issuing the command through redis-py against rotating nodes (`self.nodes[i % len(self.nodes)]`)
+      - Assert the **exact** aggregated outcome: total count (`STRLEN`/`LLEN`/`ZCARD`-style), every reply distinct where the semantics require it, and final value/content verified on **all 3 nodes**
+      - Use standard redis-py API only (same rule as above)
+    - Read-modify-write commands (counters, append, push/pop, member add/remove, size accounting) are **lost-update candidates by default** — if the command is not atomic under this test, do not ship it: fix the command with a conditional transaction (see `docs/bug.md` §3.4 reference implementations: `SET NX`, `INCR`, `HINCRBY`, `APPEND`, `LPUSH`, `LPOP/RPOP`, `ZADD`, `ZREM`) before merging
+    - The goal is to catch concurrency defects when a command is first added, not after they are discovered in production or performance testing
+
+8. **Update README.md**: Mark command as ✅ in the commands table
 
 **⚠️ IMPORTANT: Every new command MUST include both unit tests AND integration tests! Tests are not optional!**
 
 **⚠️ CRITICAL: Integration tests MUST use redis-py standard API. Using `execute_command()` is strictly prohibited as it hides compatibility issues!**
+
+**⚠️ CRITICAL: Every write command MUST include a concurrent test. Concurrency defects (lost updates, duplicated delivery, corrupted counters) are systemic in a Raft-replicated store — a command that passes only sequential tests must be assumed broken until proven otherwise!**
 
 ## Configuration
 

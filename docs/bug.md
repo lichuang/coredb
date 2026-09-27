@@ -370,11 +370,14 @@ redis-cli -p 16679 LLEN lp2       # 实测 ~22
 
 ## 7. 待办
 
-- [ ] 实测 `LREM`/`LSET`/`HDEL`/`SREM`/`ZREM` 的具体丢失率（`LPOP`/`RPOP` 已修复）
+- [ ] 实测 `LREM`/`LSET`/`HDEL`/`SREM` 的具体丢失率（`LPOP`/`RPOP`/`ZREM` 已修复）
 - [ ] 实测 `GETSET` 对非 string 旧值的并发覆盖（§3.3 的恢复竞态）
 - [ ] 设计并实现统一 `atomic_mutate` helper（方案 B），**同步改进重试策略（退避 + jitter）**
 - [ ] 逐个迁移受影响命令
-- [ ] 为每类命令补充并发集成测试（参照 `test_set_nx_concurrent_atomicity`）
+- [ ] 为每类命令补充并发集成测试（参照 `test_set_nx_concurrent_atomicity`；
+      **流程要求已写入 `AGENTS.md` 第 7 步**——新增写命令必须自带并发用例，
+      8 线程 + Barrier 轮转打 3 节点，断言精确聚合结果与全节点终态，
+      并发不过不得合入）
 - [ ] 评估是否将原子 RMW 下沉到 rockraft（方案 C），规避此前 TxnIncr 的两个实现错误
 - [ ] 修复 `GETSET` 的 WRONGTYPE 恢复竞态（可并入方案 B）
 - [ ] 评估 rockraft 条件事务的 TTL 感知：`TxnCondition::not_exists` 对「过期视为不存在」
@@ -382,3 +385,8 @@ redis-cli -p 16679 LLEN lp2       # 实测 ~22
       可在 `TxnOp` 增加 `NotExistsOrExpired`，或让条件判定感知 `expires_at`
 - [ ] 评估 CAS 重试上限与热点 key 的可用性悬崖（§3.4 警告：100 并发仅约 60 次成功），
       APPEND/HINCRBY 的退避策略（`util/cas.rs`）应随方案 B 统一回迁
+
+> 流程备注：自 2026-09 起，`AGENTS.md`「Adding New Commands」已加入
+> **第 7 步 Concurrency Tests（对每个写命令强制）**——并发用例不再是修复时的
+> 补救动作，而是新命令合入的前置门槛。本文件 §3.4 的 8 组参考实现即为该步骤
+> 指定的修复范式。

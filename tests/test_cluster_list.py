@@ -707,6 +707,88 @@ class TestClusterList(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_rpush_concurrent_no_loss(self) -> bool:
+        """Test that concurrent RPUSH from many clients keeps every element.
+
+        This is the lost-update defect recorded in docs/bug.md section 1.3:
+        racing writers computed the same sub-key index and overwrote each
+        other's elements (same root cause as concurrent LPUSH).
+        """
+        print("\nTest: Concurrent RPUSH (8 clients x 25, no element loss)")
+
+        import threading
+
+        test_key = "rpush_concurrent_key"
+        num_clients = 8
+        pushes_per_client = 25
+        expected_len = num_clients * pushes_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        lengths = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for i in range(pushes_per_client):
+                    lengths.append(node.rpush(test_key, f"r{client_id}-{i}"))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(lengths) != expected_len:
+            print(f"\033[31m  FAILED: expected {expected_len} replies, got {len(lengths)}")
+            return False
+
+        # Every reply must be distinct 1..expected_len: a repeated length
+        # would mean a push overwrote another one (lost element).
+        duplicates = len(lengths) - len(set(lengths))
+        if duplicates != 0:
+            print(f"\033[31m  FAILED: {duplicates} duplicate RPUSH lengths "
+                  f"(lengths must be distinct 1..{expected_len})")
+            return False
+
+        for i, node in enumerate(self.nodes, 1):
+            llen = node.conn.llen(test_key)
+            if llen != expected_len:
+                print(f"\033[31m  Node {i} FAILED: LLEN expected {expected_len}, got {llen}")
+                return False
+            members = node.conn.lrange(test_key, 0, -1)
+            if len(members) != expected_len:
+                print(f"\033[31m  Node {i} FAILED: LRANGE returned {len(members)} "
+                      f"of {expected_len} elements")
+                return False
+            expected_members = {f"r{c}-{i}" for c in range(num_clients)
+                                for i in range(pushes_per_client)}
+            missing = expected_members - set(members)
+            extra = set(members) - expected_members
+            if missing or extra:
+                print(f"\033[31m  Node {i} FAILED: missing {sorted(missing)[:3]}, "
+                      f"extra {sorted(extra)[:3]}")
+                return False
+            print(f"    Node {i}: LLEN={llen}, all {expected_len} elements distinct: OK")
+
+        print(f"  {num_clients} clients x {pushes_per_client} concurrent RPUSH")
+        print(f"  -> {expected_len} distinct lengths, no lost/extra elements: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_llen_nonexistent_key(self) -> bool:
         """Test LLEN on a non-existent key returns 0."""
         print("\nTest: LLEN non-existent key")
@@ -2087,6 +2169,7 @@ class TestClusterList(TestClusterBase):
             self.test_rpush_empty_element,
             self.test_rpush_binary_element,
             self.test_rpush_after_lpush,
+            self.test_rpush_concurrent_no_loss,
             self.test_llen_nonexistent_key,
             self.test_llen_after_push,
             self.test_llen_after_pop,

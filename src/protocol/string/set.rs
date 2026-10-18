@@ -534,7 +534,6 @@ mod tests {
 
   #[test]
   fn test_observed_previous_only_for_live_strings() {
-    let now = 10_000;
     let live = StringValue::with_expiration(b"old-value", 20_000).serialize();
     assert_eq!(
       observed_previous(&Observed::Live, &Some(live)),

@@ -6,17 +6,27 @@
 //! Returns:
 //! - The number of fields that were added (not updated)
 //!
-//! Note: This command uses atomic batch write to ensure all fields and metadata
-//! are written together as a single atomic operation.
+//! Concurrency: field sub-keys are qualified by the metadata's `version`, and
+//! the field count is tracked by `size`. Concurrent HSETs that read the same
+//! metadata would each write `size = read_size + added` back — the last
+//! writer wins and the count loses every other writer's additions
+//! (docs/bug.md §1.5), while writers whose `version` regeneration lands on a
+//! different millisecond file fields into sub-key spaces that the surviving
+//! metadata makes invisible. The read-modify-write is therefore guarded by a
+//! conditional transaction that pins the observed metadata bytes; losers
+//! re-read and retry with capped, jittered backoff.
+//!
+//! Note: This command uses a conditional transaction so that all fields and
+//! metadata are written together as a single atomic, conflict-checked unit.
 
-use rockraft::raft::types::UpsertKV;
+use rockraft::raft::types::{TxnCondition, TxnReply, TxnReq, UpsertKV};
 
 use crate::encoding::{HashFieldValue, HashMetadata};
 use crate::error::{CoreDbError, ProtocolError};
 use crate::protocol::command::Command;
 use crate::protocol::resp::Value;
 use crate::server::Server;
-use crate::util::now_ms;
+use crate::util::{MAX_CAS_RETRIES, backoff_delay, now_ms};
 use async_trait::async_trait;
 
 /// Parsed HSET arguments
@@ -74,68 +84,100 @@ impl HSetCommand {
   }
 }
 
+/// The current hash state observed for the target key.
+enum CurrentHash {
+  /// Key absent: HSET creates a fresh hash, guarded by `not_exists`.
+  Absent,
+  /// Present, unexpired, and a hash; carries its serialized metadata bytes.
+  Hash {
+    raw: Vec<u8>,
+    metadata: HashMetadata,
+  },
+  /// Present but expired: logically absent, yet its bytes still sit in the
+  /// store, so the CAS must pin those bytes with `eq` — `not_exists` would
+  /// never hold and the command would spin out its retry budget. The fresh
+  /// hash gets a new version, so old field sub-keys become invisible.
+  Expired { raw: Vec<u8> },
+  /// Present but not a hash value: report WRONGTYPE instead of overwriting.
+  Other,
+}
+
+async fn observe_current(server: &Server, key: &str) -> Result<CurrentHash, CoreDbError> {
+  let raw = match server.get(key).await? {
+    Some(bytes) => bytes,
+    None => return Ok(CurrentHash::Absent),
+  };
+
+  match HashMetadata::deserialize(&raw) {
+    Ok(meta) if meta.get_type() != crate::encoding::TYPE_HASH => Ok(CurrentHash::Other),
+    Ok(meta) if meta.is_expired(now_ms()) => Ok(CurrentHash::Expired { raw }),
+    Ok(meta) => Ok(CurrentHash::Hash {
+      raw,
+      metadata: meta,
+    }),
+    Err(_) => Ok(CurrentHash::Other),
+  }
+}
+
 #[async_trait]
 impl Command for HSetCommand {
   async fn execute(&self, items: &[Value], server: &Server) -> Result<Value, CoreDbError> {
-    // Parse arguments
     let args = Self::parse_args(items)?;
 
-    // Get or create metadata
-    let mut metadata = match server.get(&args.key).await? {
-      Some(raw_meta) => match HashMetadata::deserialize(&raw_meta) {
-        Ok(meta) => {
-          // Check if expired
-          if meta.is_expired(now_ms()) {
-            // Expired, treat as new
-            HashMetadata::new()
-          } else {
-            meta
-          }
+    for attempt in 0..MAX_CAS_RETRIES {
+      // Pin the observed metadata bytes: field sub-keys live in the version
+      // space the metadata carries, and `size` counts the fields, so the
+      // writes only land if the metadata is unchanged at apply time.
+      let (condition, mut metadata) = match observe_current(server, &args.key).await? {
+        CurrentHash::Other => return Err(ProtocolError::WrongType.into()),
+        CurrentHash::Absent => (TxnCondition::not_exists(&args.key), HashMetadata::new()),
+        // An expired hash reads as absent, but its bytes are still stored:
+        // pin them with `eq` (not_exists would never hold). The fresh hash
+        // carries a new version, so expired fields stay unreachable.
+        CurrentHash::Expired { raw } => (TxnCondition::eq(&args.key, raw), HashMetadata::new()),
+        CurrentHash::Hash { raw, metadata } => (TxnCondition::eq(&args.key, raw), metadata),
+      };
+
+      let version = metadata.version;
+      let mut added_count = 0i64;
+
+      // Prepare field entries; existence checks run against the pinned
+      // version space, so a field is only "new" relative to this metadata.
+      let mut entries: Vec<UpsertKV> = Vec::new();
+
+      for (field, value_data) in &args.fields {
+        let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, field);
+
+        let field_exists = (server.get(&sub_key_str).await?).is_some();
+        if !field_exists {
+          metadata.incr_size();
+          added_count += 1;
         }
-        Err(_) => {
-          // Corrupted, create new
-          HashMetadata::new()
-        }
-      },
-      None => {
-        // Not found, create new
-        HashMetadata::new()
+
+        let field_value = HashFieldValue::new(value_data.clone());
+        entries.push(UpsertKV::insert(sub_key_str, &field_value.serialize()));
       }
-    };
 
-    let version = metadata.version;
-    let mut added_count = 0i64;
+      entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
 
-    // Prepare batch write entries
-    let mut entries: Vec<UpsertKV> = Vec::new();
+      let reply = server
+        .txn(TxnReq::new(vec![condition]).if_then_ops(entries))
+        .await?;
 
-    // Process each field-value pair and prepare entries
-    for (field, value_data) in &args.fields {
-      // Use hex-encoded sub_key for storage (guaranteed valid UTF-8)
-      let sub_key_str = HashFieldValue::build_sub_key_hex(args.key.as_bytes(), version, field);
-
-      // Check if field exists (for counting added fields)
-      let field_exists = (server.get(&sub_key_str).await?).is_some();
-
-      // Prepare field value entry
-      let field_value = HashFieldValue::new(value_data.clone());
-      entries.push(UpsertKV::insert(sub_key_str, &field_value.serialize()));
-
-      // Update metadata if this is a new field
-      if !field_exists {
-        metadata.incr_size();
-        added_count += 1;
+      match reply {
+        TxnReply::Success { branch: true, .. } => {
+          return Ok(Value::Integer(added_count));
+        }
+        // Lost the race; back off (jittered, capped) so concurrent losers do
+        // not re-compete in lockstep, then re-observe.
+        _ => {
+          tokio::time::sleep(backoff_delay(attempt)).await;
+          continue;
+        }
       }
     }
 
-    // Add metadata entry
-    entries.push(UpsertKV::insert(args.key.clone(), &metadata.serialize()));
-
-    // Perform atomic batch write
-    server.batch_write(entries).await?;
-
-    // Return the number of newly added fields
-    Ok(Value::Integer(added_count))
+    Err(ProtocolError::Custom("ERR hset retry limit exceeded").into())
   }
 }
 

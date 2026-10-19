@@ -217,6 +217,181 @@ class TestClusterHash(TestClusterBase):
         print("\033[32m  PASSED\033[0m")
         return True
 
+    def test_hset_concurrent_no_count_corruption(self) -> bool:
+        """Test that concurrent HSET from many clients keeps size exact.
+
+        This is the lost-update defect recorded in docs/bug.md section 1.5:
+        100 concurrent HSET used to yield HLEN 63 and HKEYS 99 — racing
+        writers each wrote `size = read_size + added` back, and writers whose
+        version regeneration landed on a different millisecond filed fields
+        into invisible sub-key spaces.
+        """
+        print("\nTest: Concurrent HSET (8 clients x 25 unique fields, exact HLEN)")
+
+        import threading
+
+        test_key = "hset_concurrent_key"
+        num_clients = 8
+        fields_per_client = 25
+        expected = num_clients * fields_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        results = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                for j in range(fields_per_client):
+                    member = f"f{client_id}-{j}"
+                    results.append(node.hset(test_key, member, f"v{client_id}-{j}"))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(results) != expected:
+            print(f"\033[31m  FAILED: expected {expected} replies, got {len(results)}")
+            return False
+
+        # Every field is unique, so every reply must report added=1; a 0 would
+        # mean the write was applied against state this writer never saw.
+        wrong_added = [r for r in results if r != 1]
+        if wrong_added:
+            print(f"\033[31m  FAILED: {len(wrong_added)} replies with added != 1: "
+                  f"{wrong_added[:3]}")
+            return False
+
+        expected_fields = {f"f{c}-{j}": f"v{c}-{j}"
+                           for c in range(num_clients)
+                           for j in range(fields_per_client)}
+        for i, node in enumerate(self.nodes, 1):
+            hlen = node.conn.hlen(test_key)
+            if hlen != expected:
+                print(f"\033[31m  Node {i} FAILED: HLEN expected {expected}, got {hlen}")
+                return False
+
+            # HKEYS/HGETALL scan the sub-key space, so this also proves no
+            # field was filed into an invisible version space.
+            actual = node.conn.hgetall(test_key)
+            if len(actual) != expected:
+                print(f"\033[31m  Node {i} FAILED: HGETALL returned {len(actual)} "
+                      f"of {expected} fields")
+                return False
+            if actual != expected_fields:
+                missing = set(expected_fields) - set(actual)
+                drifted = {k: (expected_fields[k], actual.get(k))
+                           for k in expected_fields
+                           if k in actual and actual[k] != expected_fields[k]}
+                print(f"\033[31m  Node {i} FAILED: missing {sorted(missing)[:3]}, "
+                      f"value drift {dict(list(drifted.items())[:3])}")
+                return False
+            print(f"    Node {i}: HLEN={hlen}, all {expected} fields exact: OK")
+
+        print(f"  {num_clients} clients x {fields_per_client} concurrent HSET")
+        print(f"  -> {expected} fields, every reply added=1, values exact: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
+    def test_hdel_concurrent_no_count_corruption(self) -> bool:
+        """Test that concurrent HDEL from many clients removes every field.
+
+        HDEL is the mirror of the HSET race: concurrent removals each wrote
+        `size = read_size - removed` back, so the surviving size undercounted
+        and drifted from the real field count.
+        """
+        print("\nTest: Concurrent HDEL (8 clients x 10 unique fields, exact HLEN)")
+
+        import threading
+
+        test_key = "hdel_concurrent_key"
+        num_clients = 8
+        fields_per_client = 10
+        expected = num_clients * fields_per_client
+
+        write_node = self._get_random_node()
+        write_node.delete(test_key)
+
+        # Populate first (sequential) so this test isolates the HDEL race.
+        mapping = {f"f{c}-{j}": f"v{c}-{j}"
+                   for c in range(num_clients)
+                   for j in range(fields_per_client)}
+        write_node.hset(test_key, mapping=mapping)
+
+        results = []
+        errors = []
+        barrier = threading.Barrier(num_clients)
+
+        def worker(client_id):
+            try:
+                node = self.nodes[client_id % len(self.nodes)].conn
+                barrier.wait()
+                client_fields = [f"f{client_id}-{j}" for j in range(fields_per_client)]
+                removed = node.hdel(test_key, *client_fields)
+                results.append((client_id, client_fields, removed))
+            except redis.RedisError as e:
+                errors.append(f"client-{client_id}: {e}")
+
+        threads = [
+            threading.Thread(target=worker, args=(i,)) for i in range(num_clients)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        if errors:
+            print(f"\033[31m  FAILED: client errors: {errors[:3]}")
+            return False
+
+        if len(results) != num_clients:
+            print(f"\033[31m  FAILED: expected {num_clients} replies, got {len(results)}")
+            return False
+
+        # Every client must remove exactly its own fields.
+        wrong_removed = [(c, r) for c, fs, r in results if r != fields_per_client]
+        if wrong_removed:
+            print(f"\033[31m  FAILED: {len(wrong_removed)} clients with removed != "
+                  f"{fields_per_client}: {wrong_removed[:3]}")
+            return False
+
+        remaining = expected - num_clients * fields_per_client
+
+        for i, node in enumerate(self.nodes, 1):
+            hlen = node.conn.hlen(test_key)
+            if hlen != remaining:
+                print(f"\033[31m  Node {i} FAILED: HLEN expected {remaining}, got {hlen}")
+                return False
+            keys = set(node.conn.hkeys(test_key))
+            removed_all = {f"f{c}-{j}" for c in range(num_clients)
+                           for j in range(fields_per_client)}
+            if keys != set(mapping) - removed_all:
+                print(f"\033[31m  Node {i} FAILED: leftover fields mismatch")
+                return False
+            print(f"    Node {i}: HLEN={hlen}, only own fields removed: OK")
+
+        print(f"  {num_clients} clients x {fields_per_client} concurrent HDEL")
+        print(f"  -> {num_clients * fields_per_client} removed with exact counts, "
+              f"{remaining} fields remain: OK")
+
+        print("\033[32m  PASSED\033[0m")
+        return True
+
     def test_hdel_atomicity_batch_consistency(self) -> bool:
         """Test HDEL batch write atomicity - all fields deleted together.
         
@@ -1892,6 +2067,7 @@ class TestClusterHash(TestClusterBase):
         
         tests = [
             self.test_hset_and_hget,
+            self.test_hset_concurrent_no_count_corruption,
             self.test_hset_multiple_fields,
             self.test_hset_multiple_fields_mixed,
             self.test_hset_atomicity_batch_consistency,
@@ -1901,6 +2077,7 @@ class TestClusterHash(TestClusterBase):
             self.test_hgetall_empty_hash,
             self.test_hgetall_after_hdel,
             self.test_hdel_atomicity_batch_consistency,
+            self.test_hdel_concurrent_no_count_corruption,
             self.test_hgetall_after_hset_update,
             self.test_hkeys_basic,
             self.test_hkeys_empty_hash,

@@ -22,7 +22,7 @@ CoreDB 存在**系统性**的并发正确性问题：所有"先读 metadata → 
 | 🔴 高 | `LPOP` / `RPOP` | 同 head/tail 竞态，可能重复弹出或漏弹 | ✅ 已修复 |
 | 🟠 中 | `ZADD` | 50 并发 → 48 个成员（丢失成员） | ✅ 已修复 |
 | 🟠 中 | `ZREM` | 同 ZADD 模式 | ✅ 已修复 |
-| 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） | ⬜ 未修复 |
+| 🟠 中 | `HSET` / `HDEL` | 100 并发 → `HLEN` 63、`HKEYS` 99（计数错乱） | ✅ 已修复 |
 | 🟠 中 | `SADD` / `SREM` / `SETBIT` | 元数据 `size` 计数错乱 | ⬜ 未修复 |
 | 🟡 低 | `LREM` / `LSET` / `EXPIRE` / `RENAME` / `GETSET` | 同模式，受影响程度待实测 | ⬜ 未修复 |
 
@@ -151,6 +151,22 @@ redis-cli HLEN hh          # -> 63  (错)
 redis-cli HKEYS hh | wc -l # -> 99  (接近正确)
 ```
 
+**HSET/HDEL 已修复**：两命令改为条件事务 CAS，以观察到的 metadata 序列化字节作
+`TxnCondition::eq`（不存在时 `not_exists`），apply 时 metadata 未变才写入；
+输者带退避重试。消除的机制：
+
+- **HSET**：`size = 读到的size + added` 丢失更新（HLEN 63 的直接原因）；以及
+  version 重建落在不同毫秒时把 field 写入不可见子键空间（HKEYS 99 的原因）
+- **HDEL**（镜像）：`size = 读到的size - removed` 丢失更新
+- 语义修正（对齐 Redis）：HDEL 对非 hash key 报 WRONGTYPE（原实现会以任意
+  type 位误读其他类型字节后继续删子键）；过期/缺失/损坏 → 返 0 不进事务
+  （无可竞争状态）
+
+并发回归测试：`tests/test_cluster_hash.py::test_hset_concurrent_no_count_corruption`
+（8 客户端 × 25 唯一 field，每回复 added=1，全节点 HLEN/HGETALL 精确 200）与
+`test_hdel_concurrent_no_count_corruption`
+（8 客户端 × 10 唯一 field，每客户端恰删 10，剩余 240 字段全节点一致）。
+
 ### 1.6 对照组：看似正确的命令
 
 | 命令 | 100 并发结果 | 说明 |
@@ -231,8 +247,8 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 
 | 文件 | 读 | 写 | 状态 |
 |---|---|---|---|
-| `src/protocol/hash/hset.rs` | `:84`, `:118` | `:135` | ⬜ 未修复 |
-| `src/protocol/hash/hdel.rs` | 同模式 | 同模式 | ⬜ 未修复 |
+| `src/protocol/hash/hset.rs` | `:84`, `:118` | `:135` | ✅ 已修复（§1.5） |
+| `src/protocol/hash/hdel.rs` | 同模式 | 同模式 | ✅ 已修复（§1.5） |
 | `src/protocol/hash/hsetnx.rs` | 同模式 | 同模式 | ⬜ 未修复 |
 | `src/protocol/set/sadd.rs` | `:49`, `:73` | `:86` | ⬜ 未修复 |
 | `src/protocol/set/srem.rs` | 同模式 | 同模式 | ⬜ 未修复 |
@@ -265,6 +281,7 @@ issue #1 描述的是同一根因在 `SET NX` 上的表现：
 | `LPOP` / `RPOP` | CAS 锁定 metadata 字节（同一 metadata 仅一个胜者，每元素恰投递一次）；子键缺失按陈旧状态重试；弹空删 metadata 键（同一条件覆盖两条路径） | `src/protocol/list/lpop.rs`, `rpop.rs` |
 | `ZADD` | CAS 锁定 metadata 字节（串行化 size 累加与 version 赋值，消除 version 隔离）；过期 zset 用 `eq` 锁旧字节 | `src/protocol/zset/zadd.rs` |
 | `ZREM` | CAS 锁定 metadata 字节（串行化 size 递减）；无竞争状态（过期/空）直接返 0 不进事务 | `src/protocol/zset/zrem.rs` |
+| `HSET` / `HDEL` | CAS 锁定 metadata 字节（串行化 size 增/减，并串行化 version 重建消除子键空间隔离）；HDEL 新增 type 位校验报 WRONGTYPE | `src/protocol/hash/hset.rs`, `hdel.rs` |
 
 > ⚠️ **参考时须注意**：`atomic_incr` 的 CAS 重试在**热点 key 下会耗尽上限**（实测 100 并发打同一 key，2000 次请求仅约 60 次成功，其余报 `ERR increment retry limit exceeded`）。这是"每个重试都是完整读+事务往返"的固有代价——冲突概率 ≈ 1/N，N 个并发客户端需要 N 次重试。
 >
